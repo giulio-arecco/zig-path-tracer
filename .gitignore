@@ -1,3 +1,4 @@
+images/
 .zig-cache/
 zig-out/
 *.o

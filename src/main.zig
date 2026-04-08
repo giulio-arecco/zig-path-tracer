@@ -1,62 +1,14 @@
 const std = @import("std");
+const color = @import("color.zig");
+
 const print = std.debug.print;
-
-const Color = struct {
-    r: u8,
-    g: u8,
-    b: u8,
-
-    pub inline fn toPacked(self: @This()) u24 {
-        return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
-    }
-};
-
-pub fn Gradient(comptime T: type) type {
-    comptime {
-        if (@typeInfo(T) != .float) {
-            @compileError("Gradient requires a float type (i.e. f32, f64), received: " ++ @typeName(T));
-        }
-    }
-
-    return struct {
-        start_color: Color,
-        end_color: Color,
-
-        min_t: T = 0.0,
-        max_t: T = 1.0,
-
-        pub fn eval(self: @This(), t: T) !Color {
-            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
-
-            const norm_t = try self.normalize(t);
-            const sr = @as(T, @floatFromInt(self.start_color.r));
-            const sg = @as(T, @floatFromInt(self.start_color.g));
-            const sb = @as(T, @floatFromInt(self.start_color.b));
-            const er = @as(T, @floatFromInt(self.end_color.r));
-            const eg = @as(T, @floatFromInt(self.end_color.g));
-            const eb = @as(T, @floatFromInt(self.end_color.b));
-
-            return Color {
-                .r = @intFromFloat(@round(std.math.lerp(sr, er, norm_t))),
-                .g = @intFromFloat(@round(std.math.lerp(sg, eg, norm_t))),
-                .b = @intFromFloat(@round(std.math.lerp(sb, eb, norm_t))),
-            };
-        }
-
-        pub fn evalPacked(self: @This(), t: T) !u24 {
-            const color = try self.eval(t);
-            return color.toPacked();
-        }
-
-        fn normalize(self: @This(), t: T) !f32 {
-            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
-            return (t - self.min_t) / (self.max_t - self.min_t);
-        }
-    };
-}
+const Color = color.Color;
+const Gradient = color.Gradient;
 
 const IMG_HEIGHT= 512;
 const IMG_WIDTH = 512;
+const CIRCLE_CENTER_X = 128;
+const CIRCLE_CENTER_Y = 128;
 const CIRCLE_RADIUS = 64;
 
 const IMG_OUT_NAME = "output";
@@ -64,25 +16,26 @@ const IMG_OUT_EXT = ".ppm";
 const IMG_OUT_PATHS = &[_][]const u8{"images", IMG_OUT_NAME ++ IMG_OUT_EXT};
 
 pub fn main(init: std.process.Init) !void {
-    try savePpmCircle(init.io, init.gpa, IMG_HEIGHT, IMG_WIDTH, CIRCLE_RADIUS);
+    try savePpmCircle(init.io, init.gpa, IMG_HEIGHT, IMG_WIDTH, CIRCLE_CENTER_X, CIRCLE_CENTER_Y, CIRCLE_RADIUS);
     print("Output file created successfully.\n", .{});
 }
 
 /// Writes on disk an image of a circle in the PPM P6 format
-fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, img_height: u16, img_width: u16, radius: u16) !void {
+fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, img_height: u16, img_width: u16, center_x: u16, center_y: u16, radius: u16) !void {
     const int_type = isize;
 
     const img_half_height = img_height / 2;
     const img_half_width = img_width / 2;
     const int_rad = @as(int_type, radius);
     const rad_2 = int_rad * int_rad;
+    const x_c = @as(int_type, center_x);
+    const y_c = @as(int_type, center_y);
 
-    // const circle_color = Color {.r = 255, .g = 255, .b = 255};
     const gradient = Gradient(f32) {
         .start_color = .{.r = 110, .g = 225, .b = 225},
         .end_color   = .{.r = 240, .g = 200, .b = 20},
-        .min_t = @floatFromInt(-int_rad), //TODO: add circle center coords to computation
-        .max_t = @floatFromInt(int_rad)   //TODO: add circle center coords to computation
+        .min_t = @floatFromInt(x_c - int_rad),
+        .max_t = @floatFromInt(x_c + int_rad)
     };
     const bg_color = Color {.r = 0, .g = 0, .b = 0};
 
@@ -97,12 +50,12 @@ fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, img_height: u16, img_
     try writer.print("P6\n{d} {d}\n255\n", .{img_width, img_height});
 
     for(0..img_height) |i| {
-        const y= @as(int_type, @intCast(i)) - img_half_height; // y is in range [-img_half_height, img_half_height)
-        const y_2 = y * y;
+        const y= img_half_height - @as(int_type, @intCast(i)); // y is in range (-img_half_height, img_half_height]
+        const y_2 = (y - y_c) * (y - y_c);
 
         for (0..img_width) |j| {
             const x= @as(int_type, @intCast(j)) - img_half_width; // x is in range [-img_half_width, img_half_width)
-            const x_2 = x * x;
+            const x_2 = (x - x_c) * (x - x_c);
 
 
             if (x_2 + y_2 > rad_2) {

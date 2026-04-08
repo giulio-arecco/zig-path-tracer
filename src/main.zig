@@ -11,6 +11,50 @@ const Color = struct {
     }
 };
 
+pub fn Gradient(comptime T: type) type {
+    comptime {
+        if (@typeInfo(T) != .float) {
+            @compileError("Gradient requires a float type (i.e. f32, f64), received: " ++ @typeName(T));
+        }
+    }
+
+    return struct {
+        start_color: Color,
+        end_color: Color,
+
+        min_t: T = 0.0,
+        max_t: T = 1.0,
+
+        pub fn eval(self: @This(), t: T) !Color {
+            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
+
+            const norm_t = try self.normalize(t);
+            const sr = @as(T, @floatFromInt(self.start_color.r));
+            const sg = @as(T, @floatFromInt(self.start_color.g));
+            const sb = @as(T, @floatFromInt(self.start_color.b));
+            const er = @as(T, @floatFromInt(self.end_color.r));
+            const eg = @as(T, @floatFromInt(self.end_color.g));
+            const eb = @as(T, @floatFromInt(self.end_color.b));
+
+            return Color {
+                .r = @intFromFloat(@round(std.math.lerp(sr, er, norm_t))),
+                .g = @intFromFloat(@round(std.math.lerp(sg, eg, norm_t))),
+                .b = @intFromFloat(@round(std.math.lerp(sb, eb, norm_t))),
+            };
+        }
+
+        pub fn evalPacked(self: @This(), t: T) !u24 {
+            const color = try self.eval(t);
+            return color.toPacked();
+        }
+
+        fn normalize(self: @This(), t: T) !f32 {
+            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
+            return (t - self.min_t) / (self.max_t - self.min_t);
+        }
+    };
+}
+
 const IMG_HEIGHT= 512;
 const IMG_WIDTH = 512;
 const CIRCLE_RADIUS = 64;
@@ -24,8 +68,8 @@ pub fn main(init: std.process.Init) !void {
     print("Output file created successfully.\n", .{});
 }
 
-/// Exports an image of a circle in the PPM P6 format
-fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, comptime img_height:u16, comptime img_width: u16, radius: u16) !void {
+/// Writes on disk an image of a circle in the PPM P6 format
+fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, img_height: u16, img_width: u16, radius: u16) !void {
     const int_type = isize;
 
     const img_half_height = img_height / 2;
@@ -33,7 +77,13 @@ fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, comptime img_height:u
     const int_rad = @as(int_type, radius);
     const rad_2 = int_rad * int_rad;
 
-    const circle_color = Color {.r = 255, .g = 255, .b = 255};
+    // const circle_color = Color {.r = 255, .g = 255, .b = 255};
+    const gradient = Gradient(f32) {
+        .start_color = .{.r = 110, .g = 225, .b = 225},
+        .end_color   = .{.r = 240, .g = 200, .b = 20},
+        .min_t = @floatFromInt(-int_rad), //TODO: add circle center coords to computation
+        .max_t = @floatFromInt(int_rad)   //TODO: add circle center coords to computation
+    };
     const bg_color = Color {.r = 0, .g = 0, .b = 0};
 
     const file = try createPpmFile(io, allocator, IMG_OUT_PATHS);
@@ -59,7 +109,7 @@ fn savePpmCircle(io: std.Io, allocator: std.mem.Allocator, comptime img_height:u
                 try writer.writeInt(u24, bg_color.toPacked(), .big);
             }
             else {
-                try writer.writeInt(u24, circle_color.toPacked(), .big);
+                try writer.writeInt(u24, try gradient.evalPacked(@floatFromInt(x)), .big);
             }
         }
     }

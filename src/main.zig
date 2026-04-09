@@ -34,6 +34,8 @@ fn computePathStrLen(comptime path_components: []const []const u8) usize {
 pub fn main(init: std.process.Init) !void {
     const cwd = std.Io.Dir.cwd();
     const file = try createImgFile(init.io, cwd, FILE_PATH);
+    defer file.close(init.io);
+
     print("File created succesfully.\n", .{});
 
     const bg_color = Color {

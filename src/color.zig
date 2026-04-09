@@ -29,17 +29,17 @@ pub fn Gradient(comptime T: type) type {
             if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
 
             const norm_t = try self.normalize(t);
-            const sr = @as(T, @floatFromInt(self.start_color.r));
-            const sg = @as(T, @floatFromInt(self.start_color.g));
-            const sb = @as(T, @floatFromInt(self.start_color.b));
-            const er = @as(T, @floatFromInt(self.end_color.r));
-            const eg = @as(T, @floatFromInt(self.end_color.g));
-            const eb = @as(T, @floatFromInt(self.end_color.b));
+            const start_r = @as(T, @floatFromInt(self.start_color.r));
+            const start_g = @as(T, @floatFromInt(self.start_color.g));
+            const start_b = @as(T, @floatFromInt(self.start_color.b));
+            const end_r = @as(T, @floatFromInt(self.end_color.r));
+            const end_g = @as(T, @floatFromInt(self.end_color.g));
+            const end_b = @as(T, @floatFromInt(self.end_color.b));
 
             return Color {
-                .r = @intFromFloat(@round(std.math.lerp(sr, er, norm_t))),
-                .g = @intFromFloat(@round(std.math.lerp(sg, eg, norm_t))),
-                .b = @intFromFloat(@round(std.math.lerp(sb, eb, norm_t))),
+                .r = @intFromFloat(@round(std.math.lerp(start_r, end_r, norm_t))),
+                .g = @intFromFloat(@round(std.math.lerp(start_g, end_g, norm_t))),
+                .b = @intFromFloat(@round(std.math.lerp(start_b, end_b, norm_t))),
             };
         }
 

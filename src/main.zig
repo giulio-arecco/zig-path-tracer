@@ -60,4 +60,5 @@ pub fn main(init: std.process.Init) !void {
 test {
     _ = @import("color.zig");
     _ = @import("fsUtils.zig");
+    _ = @import("Vec3.zig");
 }

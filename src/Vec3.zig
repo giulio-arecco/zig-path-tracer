@@ -1,0 +1,649 @@
+const std = @import("std");
+
+pub const Vec3 = @This();
+pub const FType = f32;
+
+x: FType,
+y: FType,
+z: FType,
+
+
+pub fn dot(a: Vec3, b: Vec3) FType {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+pub fn squaredMagnitude(self: Vec3) FType {
+    return dot(self, self);
+}
+
+pub fn magnitude(self: Vec3) FType {
+    return std.math.sqrt(dot(self, self));
+}
+
+pub fn cross(a: Vec3, b: Vec3) Vec3 {
+    return .{
+        .x =  a.y * b.z - a.z * b.y,
+        .y = -a.x * b.z + a.z * b.x,
+        .z =  a.x * b.y - a.y * b.x
+    };
+}
+
+pub fn add(a: Vec3, b: Vec3) Vec3 {
+    return .{
+        .x = a.x + b.x,
+        .y = a.y + b.y,
+        .z = a.z + b.z
+    };
+}
+
+/// Returns a - b
+pub fn sub(a: Vec3, b: Vec3) Vec3 {
+    return .{
+        .x = a.x - b.x,
+        .y = a.y - b.y,
+        .z = a.z - b.z
+    };
+}
+
+pub fn squaredDistance(a: Vec3, b: Vec3) FType {
+    return squaredMagnitude(a.sub(b));
+}
+
+pub fn distance(a: Vec3, b: Vec3) FType {
+    return magnitude(a.sub(b));
+}
+
+pub fn isEqual(self: Vec3, other: Vec3, tolerance: FType) bool {
+    const x_equal = std.math.approxEqAbs(FType, self.x, other.x, tolerance);
+    const y_equal = std.math.approxEqAbs(FType, self.y, other.y, tolerance);
+    const z_equal = std.math.approxEqAbs(FType, self.z, other.z, tolerance);
+
+    return x_equal and y_equal and z_equal;
+}
+
+pub fn scalarMul (v: Vec3, t: FType) Vec3 {
+    return .{
+        .x = v.x * t,
+        .y = v.y * t,
+        .z = v.z * t
+    };
+}
+
+pub fn scalarDiv (v: Vec3, t: FType) !Vec3 {
+    if (t == 0.0) return error.DivisionByZero;
+    return .{
+        .x = v.x / t,
+        .y = v.y / t,
+        .z = v.z / t
+    };
+}
+
+pub fn vectorDot(a: @Vector(3, FType), b: @Vector(3, FType)) FType {
+    return @reduce(.Add, a * b);
+}
+
+pub fn vectorSquaredMagnitude(v: @Vector(3, FType)) FType {
+    return vectorDot(v, v);
+}
+
+pub fn vectorMagnitude(v: @Vector(3, FType)) FType {
+    return std.math.sqrt(vectorDot(v, v));
+}
+
+pub fn vectorSquaredDistance(a: @Vector(3, FType), b: @Vector(3, FType)) FType {
+    return vectorSquaredMagnitude(a - b);
+}
+
+pub fn vectorDistance(a: @Vector(3, FType), b: @Vector(3, FType)) FType {
+    return vectorMagnitude(a - b);
+}
+
+pub fn vectorCross(a: @Vector(3, FType), b: @Vector(3, FType)) @Vector(3, FType) {
+    return @Vector(3, FType) {
+         a[1] * b[2] - a[2] * b[1],
+        -a[0] * b[2] + a[2] * b[0],
+         a[0] * b[1] - a[1] * b[0]
+    };
+}
+
+pub fn toVector(self: Vec3) @Vector(3, FType) {
+    return @Vector(3, FType) {self.x, self.y, self.z};
+}
+
+pub fn fromVector(v: @Vector(3, FType)) Vec3 {
+    return .{ .x =  v[0], .y = v[1], .z = v[2] };
+}
+
+// ======================================================================
+//                                 TESTS
+// ======================================================================
+
+
+const eps = 2 * std.math.floatEps(FType);
+const inf = std.math.inf(FType);
+const nan = std.math.nan(FType);
+const isPositiveInf = std.math.isPositiveInf;
+const isNegativeInf = std.math.isNegativeInf;
+const isNan = std.math.isNan;
+
+test "add" {
+    var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var b = Vec3 { .x = 2.0, .y = -8.0, .z = 6.0};
+    var c = a.add(b);
+    try std.testing.expectApproxEqAbs(-3.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(2.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(9.0, c.z, eps);
+
+    a = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    c = a.add(b);
+    try std.testing.expectApproxEqAbs(b.x, c.x, eps);
+    try std.testing.expectApproxEqAbs(b.y, c.y, eps);
+    try std.testing.expectApproxEqAbs(b.z, c.z, eps);
+
+    b = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    c = a.add(b);
+    try std.testing.expectApproxEqAbs(0.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.z, eps);
+
+    a = .{ .x = inf, .y = inf, .z = inf };
+    b = .{ .x = 1.0, .y = -1.0, .z = 1.0};
+    c = a.add(b);
+    try std.testing.expect(isPositiveInf(c.x));
+    try std.testing.expect(isPositiveInf(c.y));
+    try std.testing.expect(isPositiveInf(c.z));
+
+    b = .{ .x = inf, .y = inf, .z = inf };
+    c = a.add(b);
+    try std.testing.expect(isPositiveInf(c.x));
+    try std.testing.expect(isPositiveInf(c.y));
+    try std.testing.expect(isPositiveInf(c.z));
+
+    b = .{ .x = -inf, .y = -inf, .z = -inf };
+    c = a.add(b);
+    try std.testing.expect(isNan(c.x));
+    try std.testing.expect(isNan(c.y));
+    try std.testing.expect(isNan(c.z));
+
+    a = .{ .x = -inf, .y = -inf, .z = -inf };
+    b = .{ .x = 1.0, .y = -1.0, .z = 1.0};
+    c = a.add(b);
+    try std.testing.expect(isNegativeInf(c.x));
+    try std.testing.expect(isNegativeInf(c.y));
+    try std.testing.expect(isNegativeInf(c.z));
+}
+
+test "sub" {
+    var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var b = Vec3 { .x = 2.0, .y = -8.0, .z = 6.0};
+    var c = a.sub(b);
+    try std.testing.expectApproxEqAbs(-7.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(18.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(-3.0, c.z, eps);
+
+    a = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    c = a.sub(b);
+    try std.testing.expectApproxEqAbs(-b.x, c.x, eps);
+    try std.testing.expectApproxEqAbs(-b.y, c.y, eps);
+    try std.testing.expectApproxEqAbs(-b.z, c.z, eps);
+
+    b = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    c = a.sub(b);
+    try std.testing.expectApproxEqAbs(0.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.z, eps);
+
+    a = .{ .x = inf, .y = inf, .z = inf };
+    b = .{ .x = 1.0, .y = -1.0, .z = 1.0};
+    c = a.sub(b);
+    try std.testing.expect(isPositiveInf(c.x));
+    try std.testing.expect(isPositiveInf(c.y));
+    try std.testing.expect(isPositiveInf(c.z));
+
+    b = .{ .x = inf, .y = inf, .z = inf };
+    c = a.sub(b);
+    try std.testing.expect(isNan(c.x));
+    try std.testing.expect(isNan(c.y));
+    try std.testing.expect(isNan(c.z));
+
+    b = .{ .x = -inf, .y = -inf, .z = -inf };
+    c = a.sub(b);
+    try std.testing.expect(isPositiveInf(c.x));
+    try std.testing.expect(isPositiveInf(c.y));
+    try std.testing.expect(isPositiveInf(c.z));
+
+    a = .{ .x = -inf, .y = -inf, .z = -inf };
+    b = .{ .x = 1.0, .y = -1.0, .z = 1.0};
+    c = a.sub(b);
+    try std.testing.expect(isNegativeInf(c.x));
+    try std.testing.expect(isNegativeInf(c.y));
+    try std.testing.expect(isNegativeInf(c.z));
+
+    b = .{ .x = inf, .y = inf, .z = inf };
+    c = a.sub(b);
+    try std.testing.expect(isNegativeInf(c.x));
+    try std.testing.expect(isNegativeInf(c.y));
+    try std.testing.expect(isNegativeInf(c.z));
+}
+
+test "isEqual" {
+    var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var b = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    try std.testing.expect(isEqual(a, b, eps));
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    try std.testing.expect(isEqual(a, b, eps));
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = Vec3 { .x = -0.0, .y = 0.0, .z = -0.0};
+    try std.testing.expect(isEqual(a, b, eps));
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = Vec3 { .x = -1.0, .y = 0.0, .z = 0.0};
+    try std.testing.expect(!isEqual(a, b, eps));
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = Vec3 { .x = 0.0, .y = 5.0, .z = 0.0};
+    try std.testing.expect(!isEqual(a, b, eps));
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = Vec3 { .x = 0.0, .y = 0.0, .z = -12.0};
+    try std.testing.expect(!isEqual(a, b, eps));
+
+    a = Vec3 { .x = inf, .y = inf, .z = inf};
+    b = Vec3 { .x = inf, .y = inf, .z = inf};
+    try std.testing.expect(isEqual(a, b, eps));
+
+    a = Vec3 { .x = -inf, .y = -inf, .z = -inf};
+    b = Vec3 { .x = -inf, .y = -inf, .z = -inf};
+    try std.testing.expect(isEqual(a, b, eps));
+
+    a = Vec3 { .x = inf, .y = inf, .z = inf};
+    b = Vec3 { .x = -inf, .y = inf, .z = inf};
+    try std.testing.expect(!isEqual(a, b, eps));
+
+    a = Vec3 { .x = nan, .y = nan, .z = nan};
+    b = Vec3 { .x = nan, .y = nan, .z = nan};
+    try std.testing.expect(!isEqual(a, b, eps));
+}
+
+test "scalarMul" {
+    var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var t: FType = 2.0;
+    var b = a.scalarMul(t);
+    try std.testing.expectApproxEqAbs(-10.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(20.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(6.0, b.z, eps);
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = a.scalarMul(t);
+    try std.testing.expectApproxEqAbs(0.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.z, eps);
+
+    a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    t = 0.0;
+    b = a.scalarMul(t);
+    try std.testing.expectApproxEqAbs(0.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.z, eps);
+
+    a = Vec3 { .x = inf, .y = inf, .z = -inf};
+    t = 1.0;
+    b = a.scalarMul(t);
+    try std.testing.expect(isPositiveInf(b.x));
+    try std.testing.expect(isPositiveInf(b.y));
+    try std.testing.expect(isNegativeInf(b.z));
+
+    t = 0.0;
+    b = a.scalarMul(t);
+    try std.testing.expect(isNan(b.x));
+    try std.testing.expect(isNan(b.y));
+    try std.testing.expect(isNan(b.z));
+
+    t = -inf;
+    b = a.scalarMul(t);
+    try std.testing.expect(isNegativeInf(b.x));
+    try std.testing.expect(isNegativeInf(b.y));
+    try std.testing.expect(isPositiveInf(b.z));
+
+    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0};
+    t = inf;
+    b = a.scalarMul(t);
+    try std.testing.expect(isPositiveInf(b.x));
+    try std.testing.expect(isPositiveInf(b.y));
+    try std.testing.expect(isPositiveInf(b.z));
+
+    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
+    t = -inf;
+    b = a.scalarMul(t);
+    try std.testing.expect(isNegativeInf(b.x));
+    try std.testing.expect(isNegativeInf(b.y));
+    try std.testing.expect(isNegativeInf(b.z));
+}
+
+test "scalarDiv" {
+    var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var t: FType = 0.0;
+    try std.testing.expectError(error.DivisionByZero, a.scalarDiv(t));
+
+    t = 2.0;
+    var b = try a.scalarDiv(t);
+    try std.testing.expectApproxEqAbs(-2.5, b.x, eps);
+    try std.testing.expectApproxEqAbs(5.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(1.5, b.z, eps);
+
+    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    b = try a.scalarDiv(t);
+    try std.testing.expectApproxEqAbs(0.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.z, eps);
+
+    a = Vec3 { .x = inf, .y = inf, .z = -inf};
+    t = 1.0;
+    b = try a.scalarDiv(t);
+    try std.testing.expect(isPositiveInf(b.x));
+    try std.testing.expect(isPositiveInf(b.y));
+    try std.testing.expect(isNegativeInf(b.z));
+
+    t = -inf;
+    b = try a.scalarDiv(t);
+    try std.testing.expect(isNan(b.x));
+    try std.testing.expect(isNan(b.y));
+    try std.testing.expect(isNan(b.z));
+
+    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0};
+    t = inf;
+    b = try a.scalarDiv(t);
+    try std.testing.expectApproxEqAbs(0.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.z, eps);
+
+    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
+    t = -inf;
+    b = try a.scalarDiv(t);
+    try std.testing.expectApproxEqAbs(0.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.z, eps);
+}
+
+test "dot" {
+    var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var b = Vec3 { .x = 2.0, .y = -8.0, .z = 6.0};
+    try std.testing.expectApproxEqAbs(-72.0, dot(a, b), eps);
+
+    a = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    try std.testing.expectApproxEqAbs(0.0, dot(a, b), eps);
+
+    b = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    try std.testing.expectApproxEqAbs(0.0, dot(a, b), eps);
+
+    a = .{ .x = inf, .y = inf, .z = inf };
+    b = .{ .x = 2.27, .y = 3.56, .z = 12.92};
+    try std.testing.expect(isPositiveInf(dot(a, b)));
+
+    b = .{ .x = inf, .y = inf, .z = inf };
+    try std.testing.expect(isPositiveInf(dot(a, b)));
+
+    b = .{ .x = -1.0, .y = -1.0, .z = -1.0 };
+    try std.testing.expect(isNegativeInf(dot(a, b)));
+
+    b = .{ .x = 0.0, .y = 1.0, .z = 1.0 };
+    try std.testing.expect(isNan(dot(a, b)));
+
+    b = .{ .x = 1.0, .y = -1.0, .z = 1.0};
+    try std.testing.expect(isNan(dot(a, b)));
+}
+
+test "squaredMagnitude" {
+    try std.testing.expectApproxEqAbs(134.0, (Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 }).squaredMagnitude(), eps);
+    try std.testing.expectApproxEqAbs(134.0, (Vec3 { .x = -5.0, .y = 10.0, .z = 3.0 }).squaredMagnitude(), eps);
+    try std.testing.expectApproxEqAbs(0.0, (Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 }).squaredMagnitude(), eps);
+    try std.testing.expect(isPositiveInf((Vec3 { .x = inf, .y = 10.0, .z = -3.0 }).squaredMagnitude()));
+    try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = inf, .z = -3.0 }).squaredMagnitude()));
+    try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = 10.0, .z = -3.0 }).squaredMagnitude()));
+}
+
+test "magnitude" {
+    try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), (Vec3 { .x = -5.0, .y = 10.0, .z = 3.0 }).magnitude(), eps);
+    try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), (Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 }).magnitude(), eps);
+    try std.testing.expectApproxEqAbs(0.0, (Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 }).magnitude(), eps);
+    try std.testing.expect(isPositiveInf((Vec3 { .x = inf, .y = 10.0, .z = -3.0 }).magnitude()));
+    try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = inf, .z = -3.0 }).magnitude()));
+    try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = 10.0, .z = -3.0 }).magnitude()));
+}
+
+test "squaredDistance" {
+    var a = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
+    var b = Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 };
+    try std.testing.expectApproxEqAbs(474.0, a.squaredDistance(b), eps);
+
+    a = Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 };
+    b = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
+    try std.testing.expectApproxEqAbs(474.0, a.squaredDistance(b), eps);
+
+    b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
+    try std.testing.expectApproxEqAbs(134.0, a.squaredDistance(b), eps);
+
+    b = Vec3 { .x = inf, .y = inf, .z = inf };
+    try std.testing.expect(isPositiveInf(a.squaredDistance(b)));
+
+    b = Vec3 { .x = -inf, .y = -inf, .z = -inf };
+    try std.testing.expect(isPositiveInf(a.squaredDistance(b)));
+
+    a = Vec3 { .x = inf, .y = inf, .z = inf };
+    b = Vec3 { .x = inf, .y = inf, .z = inf };
+    try std.testing.expect(isNan(a.squaredDistance(b)));
+
+    b = Vec3 { .x = -inf, .y = -inf, .z = -inf };
+    try std.testing.expect(isPositiveInf(a.squaredDistance(b)));
+}
+
+test "distance" {
+    var a = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
+    var b = Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 };
+    try std.testing.expectApproxEqAbs(std.math.sqrt(474.0), a.distance(b), eps);
+
+    a = Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 };
+    b = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
+    try std.testing.expectApproxEqAbs(std.math.sqrt(474.0), a.distance(b), eps);
+
+    b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
+    try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), a.distance(b), eps);
+
+    b = Vec3 { .x = inf, .y = inf, .z = inf };
+    try std.testing.expect(isPositiveInf(a.distance(b)));
+
+    b = Vec3 { .x = -inf, .y = -inf, .z = -inf };
+    try std.testing.expect(isPositiveInf(a.distance(b)));
+
+    a = Vec3 { .x = inf, .y = inf, .z = inf };
+    b = Vec3 { .x = inf, .y = inf, .z = inf };
+    try std.testing.expect(isNan(a.distance(b)));
+
+    b = Vec3 { .x = -inf, .y = -inf, .z = -inf };
+    try std.testing.expect(isPositiveInf(a.distance(b)));
+}
+
+test "cross" {
+    var a = Vec3 { .x = -5.0, .y = -10.0, .z = 3.0};
+    var b = Vec3 { .x = 2.0, .y = -8.0, .z = 6.0};
+    var c = cross(a, b);
+    try std.testing.expectApproxEqAbs(-36.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(36.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(60.0, c.z, eps);
+
+    a = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    c = cross(a, b);
+    try std.testing.expectApproxEqAbs(0.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.z, eps);
+
+    b = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    c = cross(a, b);
+    try std.testing.expectApproxEqAbs(0.0, c.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, c.z, eps);
+
+    a = .{ .x = inf, .y = inf, .z = 0.0 };
+    b = .{ .x = 1.0, .y = 1.0, .z = 1.0};
+    c = cross(a, b);
+    try std.testing.expect(isPositiveInf(c.x));
+    try std.testing.expect(isNegativeInf(c.y));
+    try std.testing.expect(isNan(c.z));
+}
+
+test "vectorDot" {
+    var a = @Vector(3, FType) { -5.0, 10.0, 3.0};
+    var b = @Vector(3, FType) { 2.0, -8.0, 6.0};
+    try std.testing.expectApproxEqAbs(-72.0, vectorDot(a, b), eps);
+
+    a = @Vector(3, FType) { 0.0, 0.0, 0.0 };
+    try std.testing.expectApproxEqAbs(0.0, vectorDot(a, b), eps);
+
+    b = @Vector(3, FType) { 0.0, 0.0, 0.0 };
+    try std.testing.expectApproxEqAbs(0.0, vectorDot(a, b), eps);
+
+    a = @Vector(3, FType) { inf, inf, inf };
+    b = @Vector(3, FType) { 2.27, 3.56, 12.92};
+    try std.testing.expect(isPositiveInf(vectorDot(a, b)));
+
+    b = @Vector(3, FType) { inf, inf, inf };
+    try std.testing.expect(isPositiveInf(vectorDot(a, b)));
+
+    b = @Vector(3, FType) { -1.0, -1.0, -1.0 };
+    try std.testing.expect(isNegativeInf(vectorDot(a, b)));
+
+    b = @Vector(3, FType) { 0.0, 1.0, 1.0 };
+    try std.testing.expect(isNan(vectorDot(a, b)));
+
+    b = @Vector(3, FType) { 1.0, -1.0, 1.0};
+    try std.testing.expect(isNan(vectorDot(a, b)));
+}
+
+test "vectorSquaredMagnitude" {
+    try std.testing.expectApproxEqAbs(134.0, vectorSquaredMagnitude(@Vector(3, FType) { 5.0, -10.0, -3.0 }), eps);
+    try std.testing.expectApproxEqAbs(134.0, vectorSquaredMagnitude(@Vector(3, FType) { -5.0, 10.0, 3.0 }), eps);
+    try std.testing.expectApproxEqAbs(0.0, vectorSquaredMagnitude(@Vector(3, FType) { 0.0, 0.0, 0.0 }), eps);
+    try std.testing.expect(isPositiveInf(vectorSquaredMagnitude(@Vector(3, FType) { inf, 10.0, -3.0 })));
+    try std.testing.expect(isPositiveInf(vectorSquaredMagnitude(@Vector(3, FType) { -inf, inf, -3.0 })));
+    try std.testing.expect(isPositiveInf(vectorSquaredMagnitude(@Vector(3, FType) { -inf, 10.0, -3.0 })));
+}
+
+test "vectorMagnitude" {
+    try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), vectorMagnitude(@Vector(3, FType) { -5.0, 10.0, 3.0 }), eps);
+    try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), vectorMagnitude(@Vector(3, FType) { 5.0, -10.0, -3.0 }), eps);
+    try std.testing.expectApproxEqAbs(0.0, vectorMagnitude(@Vector(3, FType) { 0.0, 0.0, 0.0 }), eps);
+    try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { inf, 10.0, -3.0 })));
+    try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { -inf, inf, -3.0 })));
+    try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { -inf, 10.0, -3.0 })));
+}
+
+test "vectorSquaredDistance" {
+    var a = @Vector(3, FType) { -2.0, -15.0, 17.0 };
+    var b = @Vector(3, FType) { 5.0, -10.0, -3.0 };
+    try std.testing.expectApproxEqAbs(474.0, vectorSquaredDistance(a, b), eps);
+
+    a = @Vector(3, FType) { 5.0, -10.0, -3.0 };
+    b = @Vector(3, FType) { -2.0, -15.0, 17.0 };
+    try std.testing.expectApproxEqAbs(474.0, vectorSquaredDistance(a, b), eps);
+
+    b = @Vector(3, FType) { 0.0, 0.0, 0.0 };
+    try std.testing.expectApproxEqAbs(134.0, vectorSquaredDistance(a, b), eps);
+
+    b = @Vector(3, FType) { inf, inf, inf };
+    try std.testing.expect(isPositiveInf(vectorSquaredDistance(a, b)));
+
+    b = @Vector(3, FType) { -inf, -inf, -inf };
+    try std.testing.expect(isPositiveInf(vectorSquaredDistance(a, b)));
+
+    a = @Vector(3, FType) { inf, inf, inf };
+    b = @Vector(3, FType) { inf, inf, inf };
+    try std.testing.expect(isNan(vectorSquaredDistance(a, b)));
+
+    b = @Vector(3, FType) { -inf, -inf, -inf };
+    try std.testing.expect(isPositiveInf(vectorSquaredDistance(a, b)));
+}
+
+test "vectorDistance" {
+    var a = @Vector(3, FType) { -2.0, -15.0, 17.0 };
+    var b = @Vector(3, FType) { 5.0, -10.0, -3.0 };
+    try std.testing.expectApproxEqAbs(std.math.sqrt(474.0), vectorDistance(a, b), eps);
+
+    a = @Vector(3, FType) { 5.0, -10.0, -3.0 };
+    b = @Vector(3, FType) { -2.0, -15.0, 17.0 };
+    try std.testing.expectApproxEqAbs(std.math.sqrt(474.0), vectorDistance(a, b), eps);
+
+    b = @Vector(3, FType) { 0.0, 0.0, 0.0 };
+    try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), vectorDistance(a, b), eps);
+
+    b = @Vector(3, FType) { inf, inf, inf };
+    try std.testing.expect(isPositiveInf(vectorDistance(a, b)));
+
+    b = @Vector(3, FType) { -inf, -inf, -inf };
+    try std.testing.expect(isPositiveInf(vectorDistance(a, b)));
+
+    a = @Vector(3, FType) { inf, inf, inf };
+    b = @Vector(3, FType) { inf, inf, inf };
+    try std.testing.expect(isNan(vectorDistance(a, b)));
+
+    b = @Vector(3, FType) { -inf, -inf, -inf };
+    try std.testing.expect(isPositiveInf(vectorDistance(a, b)));
+}
+
+test "vectorCross" {
+    var a = @Vector(3, FType) { -5.0, -10.0, 3.0};
+    var b = @Vector(3, FType) { 2.0, -8.0, 6.0};
+    var c = vectorCross(a, b);
+    try std.testing.expectApproxEqAbs(-36.0, c[0], eps);
+    try std.testing.expectApproxEqAbs(36.0, c[1], eps);
+    try std.testing.expectApproxEqAbs(60.0, c[2], eps);
+
+    a = @Vector(3, FType) { 0.0, 0.0, 0.0 };
+    c = vectorCross(a, b);
+    try std.testing.expectApproxEqAbs(0.0, c[0], eps);
+    try std.testing.expectApproxEqAbs(0.0, c[1], eps);
+    try std.testing.expectApproxEqAbs(0.0, c[2], eps);
+
+    b = @Vector(3, FType) { 0.0, 0.0, 0.0 };
+    c = vectorCross(a, b);
+    try std.testing.expectApproxEqAbs(0.0, c[0], eps);
+    try std.testing.expectApproxEqAbs(0.0, c[1], eps);
+    try std.testing.expectApproxEqAbs(0.0, c[2], eps);
+
+    a = @Vector(3, FType) { inf, inf, 0.0 };
+    b = @Vector(3, FType) { 1.0, 1.0, 1.0};
+    c = vectorCross(a, b);
+    try std.testing.expect(isPositiveInf(c[0]));
+    try std.testing.expect(isNegativeInf(c[1]));
+    try std.testing.expect(isNan(c[2]));
+}
+
+test "toVector" {
+    var a = Vec3 { .x = -5.0, .y = 0.0, .z = 3.0 };
+    var b = a.toVector();
+    try std.testing.expectEqual(a.x, b[0]);
+    try std.testing.expectEqual(a.y, b[1]);
+    try std.testing.expectEqual(a.z, b[2]);
+
+    a = Vec3 { .x = inf, .y = -inf, .z = nan };
+    b = a.toVector();
+    try std.testing.expect(isPositiveInf(b[0]));
+    try std.testing.expect(isNegativeInf(b[1]));
+    try std.testing.expect(isNan(b[2]));
+}
+
+test "fromVector" {
+    var a = @Vector(3, FType) { -5.0, 0.0, 3.0 };
+    var b = fromVector(a);
+    try std.testing.expectEqual(a[0], b.x);
+    try std.testing.expectEqual(a[1], b.y);
+    try std.testing.expectEqual(a[2], b.z);
+
+    a = @Vector(3, FType) { inf, -inf, nan};
+    b = fromVector(a);
+    try std.testing.expect(isPositiveInf(b.x));
+    try std.testing.expect(isNegativeInf(b.y));
+    try std.testing.expect(isNan(b.z));
+}

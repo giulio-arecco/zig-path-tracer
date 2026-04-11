@@ -15,7 +15,7 @@ const CIRCLE_CENTER_X = 128;
 const CIRCLE_CENTER_Y = 128;
 const CIRCLE_RADIUS = 64;
 
-const IMG_OUT_PATHS = &[_][]const u8{"images", "output.ppm"};
+const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
 const FILE_PATH = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(IMG_OUT_PATHS)});
 
@@ -55,4 +55,9 @@ pub fn main(init: std.process.Init) !void {
 
     try drawCircle(init.io, file, IMG_HEIGHT, IMG_WIDTH, CIRCLE_CENTER_X, CIRCLE_CENTER_Y, CIRCLE_RADIUS, fill, bg_color);
     print("Circle succesfully drawn on file.\n", .{});
+}
+
+test {
+    _ = @import("color.zig");
+    _ = @import("imgExporter.zig");
 }

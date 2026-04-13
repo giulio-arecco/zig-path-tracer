@@ -1,6 +1,8 @@
-const std = @import("std");
+const Vec3 = @This();
 
-pub const Vec3 = @This();
+const std = @import("std");
+const math_utils = @import("math_utils.zig");
+
 pub const FType = f32;
 
 x: FType,
@@ -20,7 +22,16 @@ pub fn magnitude(self: Vec3) FType {
     return std.math.sqrt(dot(self, self));
 }
 
+pub fn isNormalized(v: Vec3) bool {
+    if (math_utils.approxEq(FType, squaredMagnitude(v), 1.0))
+        return true;
+
+    return false;
+}
+
 pub fn normalized(v: Vec3) !Vec3 {
+    if (isNormalized(v)) return v;
+
     const m = magnitude(v);
     if (m == 0.0) return error.DivisionByZero;
 
@@ -60,10 +71,10 @@ pub fn distance(a: Vec3, b: Vec3) FType {
     return magnitude(a.sub(b));
 }
 
-pub fn isEqual(self: Vec3, other: Vec3, tolerance: FType) bool {
-    const x_equal = std.math.approxEqAbs(FType, self.x, other.x, tolerance);
-    const y_equal = std.math.approxEqAbs(FType, self.y, other.y, tolerance);
-    const z_equal = std.math.approxEqAbs(FType, self.z, other.z, tolerance);
+pub fn isEqual(self: Vec3, other: Vec3) bool {
+    const x_equal = math_utils.approxEq(FType, self.x, other.x);
+    const y_equal = math_utils.approxEq(FType, self.y, other.y);
+    const z_equal = math_utils.approxEq(FType, self.z, other.z);
 
     return x_equal and y_equal and z_equal;
 }
@@ -97,7 +108,16 @@ pub fn vectorMagnitude(v: @Vector(3, FType)) FType {
     return std.math.sqrt(vectorDot(v, v));
 }
 
+pub fn vectorIsNormalized(v: @Vector(3, FType)) bool {
+    if (math_utils.approxEq(FType, vectorSquaredMagnitude(v), 1.0))
+        return true;
+
+    return false;
+}
+
 pub fn vectorNormalized(v: @Vector(3, FType)) !@Vector(3, FType) {
+    if (vectorIsNormalized(v)) return v;
+
     const m = vectorMagnitude(v);
     if (m == 0.0) return error.DivisionByZero;
 
@@ -244,43 +264,43 @@ test "sub" {
 test "isEqual" {
     var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
     var b = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
-    try std.testing.expect(isEqual(a, b, eps));
+    try std.testing.expect(isEqual(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
-    try std.testing.expect(isEqual(a, b, eps));
+    try std.testing.expect(isEqual(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = -0.0, .y = 0.0, .z = -0.0};
-    try std.testing.expect(isEqual(a, b, eps));
+    try std.testing.expect(isEqual(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = -1.0, .y = 0.0, .z = 0.0};
-    try std.testing.expect(!isEqual(a, b, eps));
+    try std.testing.expect(!isEqual(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = 0.0, .y = 5.0, .z = 0.0};
-    try std.testing.expect(!isEqual(a, b, eps));
+    try std.testing.expect(!isEqual(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = 0.0, .y = 0.0, .z = -12.0};
-    try std.testing.expect(!isEqual(a, b, eps));
+    try std.testing.expect(!isEqual(a, b));
 
     a = Vec3 { .x = inf, .y = inf, .z = inf};
     b = Vec3 { .x = inf, .y = inf, .z = inf};
-    try std.testing.expect(isEqual(a, b, eps));
+    try std.testing.expect(isEqual(a, b));
 
     a = Vec3 { .x = -inf, .y = -inf, .z = -inf};
     b = Vec3 { .x = -inf, .y = -inf, .z = -inf};
-    try std.testing.expect(isEqual(a, b, eps));
+    try std.testing.expect(isEqual(a, b));
 
     a = Vec3 { .x = inf, .y = inf, .z = inf};
     b = Vec3 { .x = -inf, .y = inf, .z = inf};
-    try std.testing.expect(!isEqual(a, b, eps));
+    try std.testing.expect(!isEqual(a, b));
 
     a = Vec3 { .x = nan, .y = nan, .z = nan};
     b = Vec3 { .x = nan, .y = nan, .z = nan};
-    try std.testing.expect(!isEqual(a, b, eps));
+    try std.testing.expect(!isEqual(a, b));
 }
 
 test "scalarMul" {
@@ -429,6 +449,15 @@ test "magnitude" {
     try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = 10.0, .z = -3.0 }).magnitude()));
 }
 
+test "isNormalized" {
+    try std.testing.expect(isNormalized(.{ .x = std.math.sqrt1_2, .y = std.math.sqrt1_2, .z = 0.0 }));
+    try std.testing.expect(isNormalized(.{ .x = 1.0/std.math.sqrt(3.0), .y = 1.0/std.math.sqrt(3.0), .z = 1.0/std.math.sqrt(3.0) }));
+    try std.testing.expect(!isNormalized(.{ .x = 0.0, .y = 0.0, .z = 0.0 }));
+    try std.testing.expect(!isNormalized(.{ .x = 1.0, .y = 1.0, .z = 1.0 }));
+    try std.testing.expect(!isNormalized(.{ .x = inf, .y = inf, .z = inf }));
+    try std.testing.expect(!isNormalized(.{ .x = -inf, .y = -inf, .z = -inf }));
+}
+
 test "normalized" {
     var v = Vec3 { .x = 0.0, .y = 0.0, .z = -0.0};
     try std.testing.expectError(error.DivisionByZero, v.normalized());
@@ -571,6 +600,15 @@ test "vectorMagnitude" {
     try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { inf, 10.0, -3.0 })));
     try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { -inf, inf, -3.0 })));
     try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { -inf, 10.0, -3.0 })));
+}
+
+test "vectorIsNormalized" {
+    try std.testing.expect(vectorIsNormalized(@Vector(3, FType) { std.math.sqrt1_2, std.math.sqrt1_2, 0.0 }));
+    try std.testing.expect(vectorIsNormalized(@Vector(3, FType) { 1.0/std.math.sqrt(3.0), 1.0/std.math.sqrt(3.0), 1.0/std.math.sqrt(3.0) }));
+    try std.testing.expect(!vectorIsNormalized(@Vector(3, FType) { 0.0, 0.0,  0.0 }));
+    try std.testing.expect(!vectorIsNormalized(@Vector(3, FType) { 1.0, 1.0, 1.0 }));
+    try std.testing.expect(!vectorIsNormalized(@Vector(3, FType) { inf, inf, inf }));
+    try std.testing.expect(!vectorIsNormalized(@Vector(3, FType) { -inf, -inf, -inf }));
 }
 
 test "vectorNormalized" {

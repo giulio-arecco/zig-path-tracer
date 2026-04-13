@@ -1,5 +1,5 @@
 const std = @import("std");
-const color = @import("color.zig");
+const color = @import("graphics/color.zig");
 
 const print = std.debug.print;
 const Color = color.Color;

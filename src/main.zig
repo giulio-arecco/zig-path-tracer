@@ -1,6 +1,6 @@
 const std = @import("std");
-const color = @import("color.zig");
-const imgExporter = @import("fsUtils.zig");
+const color = @import("graphics/color.zig");
+const imgExporter = @import("fs_utils.zig");
 
 const print = std.debug.print;
 const drawCircle = imgExporter.drawCircle;
@@ -59,6 +59,6 @@ pub fn main(init: std.process.Init) !void {
 
 test {
     _ = @import("color.zig");
-    _ = @import("fsUtils.zig");
+    _ = @import("fs_utils.zig");
     _ = @import("Vec3.zig");
 }

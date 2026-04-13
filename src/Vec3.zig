@@ -20,6 +20,13 @@ pub fn magnitude(self: Vec3) FType {
     return std.math.sqrt(dot(self, self));
 }
 
+pub fn normalized(v: Vec3) !Vec3 {
+    const m = magnitude(v);
+    if (m == 0.0) return error.DivisionByZero;
+
+    return .{ .x = v.x / m, .y = v.y / m,  .z = v.z / m };
+}
+
 pub fn cross(a: Vec3, b: Vec3) Vec3 {
     return .{
         .x =  a.y * b.z - a.z * b.y,
@@ -88,6 +95,14 @@ pub fn vectorSquaredMagnitude(v: @Vector(3, FType)) FType {
 
 pub fn vectorMagnitude(v: @Vector(3, FType)) FType {
     return std.math.sqrt(vectorDot(v, v));
+}
+
+pub fn vectorNormalized(v: @Vector(3, FType)) !@Vector(3, FType) {
+    const m = vectorMagnitude(v);
+    if (m == 0.0) return error.DivisionByZero;
+
+    const mv: @Vector(3, FType) = @splat(m);
+    return v / mv;
 }
 
 pub fn vectorSquaredDistance(a: @Vector(3, FType), b: @Vector(3, FType)) FType {
@@ -414,6 +429,24 @@ test "magnitude" {
     try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = 10.0, .z = -3.0 }).magnitude()));
 }
 
+test "normalized" {
+    var v = Vec3 { .x = 0.0, .y = 0.0, .z = -0.0};
+    try std.testing.expectError(error.DivisionByZero, v.normalized());
+
+    v = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var n = try v.normalized();
+    try std.testing.expectApproxEqAbs(v.x / std.math.sqrt(134.0), n.x, eps);
+    try std.testing.expectApproxEqAbs(v.y / std.math.sqrt(134.0), n.y, eps);
+    try std.testing.expectApproxEqAbs(v.z / std.math.sqrt(134.0), n.z, eps);
+    try std.testing.expectApproxEqAbs(1.0, std.math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z), eps);
+
+    v = Vec3 { .x = inf, .y = inf, .z = -inf};
+    n = try v.normalized();
+    try std.testing.expect(isNan(n.x));
+    try std.testing.expect(isNan(n.y));
+    try std.testing.expect(isNan(n.z));
+}
+
 test "squaredDistance" {
     var a = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
     var b = Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 };
@@ -538,6 +571,24 @@ test "vectorMagnitude" {
     try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { inf, 10.0, -3.0 })));
     try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { -inf, inf, -3.0 })));
     try std.testing.expect(isPositiveInf(vectorMagnitude(@Vector(3, FType) { -inf, 10.0, -3.0 })));
+}
+
+test "vectorNormalized" {
+    var v = @Vector(3, FType) { 0.0, 0.0, -0.0};
+    try std.testing.expectError(error.DivisionByZero, vectorNormalized(v));
+
+    v = @Vector(3, FType) { -5.0, 10.0, 3.0};
+    var n = try vectorNormalized(v);
+    try std.testing.expectApproxEqAbs(v[0] / std.math.sqrt(134.0), n[0], eps);
+    try std.testing.expectApproxEqAbs(v[1] / std.math.sqrt(134.0), n[1], eps);
+    try std.testing.expectApproxEqAbs(v[2] / std.math.sqrt(134.0), n[2], eps);
+    try std.testing.expectApproxEqAbs(1.0, std.math.sqrt(@reduce(.Add, n*n)), eps);
+
+    v = @Vector(3, FType) { inf, inf, -inf};
+    n = try vectorNormalized(v);
+    try std.testing.expect(isNan(n[0]));
+    try std.testing.expect(isNan(n[1]));
+    try std.testing.expect(isNan(n[2]));
 }
 
 test "vectorSquaredDistance" {

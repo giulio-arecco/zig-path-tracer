@@ -30,26 +30,32 @@ pub fn approxEq(comptime T: type, x: T, y: T) bool {
     }
 }
 
-pub fn evaluateDiscriminant(comptime FType: type, a: FType, b: FType, c: FType) bool {
-    const b_sq = b * b;
-    const four_ac = 4.0 * a * c; // Consider checking if a or c ar == 1 to avoid a multiplication
-    const discr = b_sq - four_ac;
+pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) bool {
+    //TODO: Consider checking if a or c ar == 1 to avoid a multiplication
+    switch (@typeInfo(T)) {
+        .int, .comptime_int => {
+            const b_sq = b * b;
+            const four_ac = 4 * a * c;
+            const discr = b_sq - four_ac;
 
-    const max_magnitude = @max(@abs(b_sq), @abs(four_ac));
-    const tolerance: FType = 2.0;
-    const eps = std.math.floatEpsAt(FType, max_magnitude) * tolerance;
+            return discr >= 0;
+        },
+        .float, .comptime_float => {
+            std.debug.assert(!std.math.isNan(a));
+            std.debug.assert(!std.math.isNan(b));
+            std.debug.assert(!std.math.isNan(c));
 
-    if (discr > eps) {
-        // Two real solutions
-        return true;
-    }
-    else if (discr < -eps) {
-        // No real solution
-        return false;
-    }
-    else {
-        // Repeated real solution
-        return true;
+            const b_sq = b * b;
+            const four_ac = 4.0 * a * c;
+            const discr = b_sq - four_ac;
+
+            const max_magnitude = @max(@abs(b_sq), @abs(four_ac));
+            const tolerance: T = 2.0;
+            const eps = std.math.floatEpsAt(T, max_magnitude) * tolerance;
+
+            return discr >= -eps;
+        },
+        else => @compileError("Type parameter T must be float or int, received '" ++ @typeName(T) ++ "'.")
     }
 }
 
@@ -89,21 +95,28 @@ test "approxEq" {
 }
 
 test "evaluateDiscriminant" {
-    // a=1, b=5, c=6 => b^2 - 4ac = 25 - 24 = 1 > 0 => Two real solutions (true)
+    // a=1, b=5, c=6 => b^2 - 4ac = 25 - 24 = 1 > 0 => Two real roots (true)
     try std.testing.expect(evaluateDiscriminant(f32, 1.0, 5.0, 6.0));
-    // a=1, b=2, c=3 => b^2 - 4ac = 4 - 12 = -8 < 0 => No real solution (false)
+    // a=1, b=2, c=3 => b^2 - 4ac = 4 - 12 = -8 < 0 => No real roots (false)
     try std.testing.expect(!evaluateDiscriminant(f32, 1.0, 2.0, 3.0));
-    // a=1, b=4, c=4 => b^2 - 4ac = 16 - 16 = 0 => Repeated real solution (true)
+    // a=1, b=4, c=4 => b^2 - 4ac = 16 - 16 = 0 => Repeated real root (true)
     try std.testing.expect(evaluateDiscriminant(f32, 1.0, 4.0, 4.0));
 
     // Values that result in discriminant being zero mathematically, but might not be exactly zero due to floating point inaccuracies.
-    // E.g., b = sqrt(2), a = 0.5, c = 1 => 2 - 4(0.5)(1) = 2 - 2 = 0
+    // b = sqrt(2), a = 0.5, c = 1 => 2 - 4(0.5)(1) = 2 - 2 = 0
     try std.testing.expect(evaluateDiscriminant(f64, 0.5, @sqrt(2.0), 1.0));
 
     // Negative discriminant but very small in magnitude
-    // e.g. a=1, b=0, c=1e-10 => 0 - 4e-10 < 0
+    // a=1, b=0, c=1e-10 => 0 - 4e-10 < 0
     try std.testing.expect(!evaluateDiscriminant(f64, 1.0, 0.0, 1e-10));
 
     // Negative discriminant extremely close to zero
     try std.testing.expect(!evaluateDiscriminant(f64, 1.0, 2.0, 1.0 + 1e-14));
+
+    // a=1, b=5, c=6 => b^2 - 4ac = 25 - 24 = 1 > 0
+    try std.testing.expect(evaluateDiscriminant(i32, 1, 5, 6));
+    // a=1, b=2, c=3 => b^2 - 4ac = 4 - 12 = -8 < 0
+    try std.testing.expect(!evaluateDiscriminant(i32, 1, 2, 3));
+    // a=1, b=4, c=4 => b^2 - 4ac = 16 - 16 = 0
+    try std.testing.expect(evaluateDiscriminant(i32, 1, 4, 4));
 }

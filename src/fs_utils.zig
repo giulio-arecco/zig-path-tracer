@@ -14,6 +14,11 @@ pub fn computePpmP6HeaderSize(comptime max_size: u16, comptime img_width: usize,
     return std.fmt.count("P6\n{d} {d}\n{d}\n", .{ img_width, img_height, max_size });
 }
 
+pub fn writePpmP6Header(writer: *std.Io.Writer, max_size: u16, img_width: usize, img_height: usize) !void {
+    try writer.print("P6\n{d} {d}\n{d}\n", .{img_width, img_height, max_size});
+    try writer.flush();
+}
+
 /// Writes on the passed in file to create a circle in the PPM P6 image format
 pub fn drawCircle(io: std.Io, file: std.Io.File, img_height: u16, img_width: u16, center_x: u16, center_y: u16, radius: u16, fill: FillMethod, bg_color: Color) !void {
     std.debug.assert(radius > 0);
@@ -301,4 +306,49 @@ test "Draw circle on file" {
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
         0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
         }, rgb_data);
+}
+
+test "Write PPM P6 header" {
+    const io = std.testing.io;
+    var tmpDir = std.testing.tmpDir(.{});
+    defer tmpDir.cleanup();
+    const dir = tmpDir.dir;
+
+    const sub_path = "output_header.ppm";
+
+    const file = try dir.createFile(io, sub_path, .{ .read = true });
+    defer file.close(io);
+
+    var write_buf: [32]u8 = undefined;
+    var file_writer = file.writer(io, &write_buf);
+
+    var read_buf: [32]u8 = undefined;
+    var file_reader = file.reader(io, &read_buf);
+    var reader = &file_reader.interface;
+
+    try writePpmP6Header(&file_writer.interface, 255, 800, 600);
+
+    const stat = try file.stat(io);
+    const ex_1 = "P6\n800 600\n255\n";
+    try std.testing.expectEqual(ex_1.len, stat.size);
+
+    try file_reader.seekTo(0);
+    var data = try reader.take(ex_1.len);
+    try std.testing.expectEqualStrings(ex_1, data);
+
+    try file_writer.seekTo(0);
+    try writePpmP6Header(&file_writer.interface, 0, 0, 0);
+
+    try file_reader.seekTo(0);
+    const ex_2 = "P6\n0 0\n0\n";
+    data = try reader.take(ex_2.len);
+    try std.testing.expectEqualStrings(ex_2, data);
+
+    try file_writer.seekTo(0);
+    try writePpmP6Header(&file_writer.interface, std.math.maxInt(u16), 123456, 987654);
+
+    try file_reader.seekTo(0);
+    const ex_3 = "P6\n123456 987654\n65535\n";
+    data = try reader.take(ex_3.len);
+    try std.testing.expectEqualStrings(ex_3, data);
 }

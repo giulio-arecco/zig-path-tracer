@@ -3,6 +3,7 @@ const Scene = @This();
 const std = @import("std");
 const Vec3 = @import("../../Vec3.zig");
 const Camera = @import("Camera.zig");
+const Float = @import("../../config.zig").Float;
 const math_utils = @import("../../math_utils.zig");
 const approxEq = math_utils.approxEq;
 const evaluateDiscriminant = math_utils.evaluateDiscriminant;
@@ -11,7 +12,7 @@ const dot = Vec3.dot;
 
 pub const Sphere = struct {
     center: Vec3,
-    radius: f32
+    radius: Float
 };
 
 camera: Camera,
@@ -61,8 +62,8 @@ pub fn drawSphere(sceneData: Scene, writer: anytype) !void {
     for (0..screen_height) |y_screen| {
         for (0..screen_width) |x_screen| {
             // Pixel center
-            const u = @as(f32, @floatFromInt(x_screen)) + 0.5;
-            const v = @as(f32, @floatFromInt(y_screen)) + 0.5;
+            const u = @as(Float, @floatFromInt(x_screen)) + 0.5;
+            const v = @as(Float, @floatFromInt(y_screen)) + 0.5;
 
             const pixel = screen_top_left.add(camera_right.scalarMul(u)).sub(camera_up.scalarMul(v));
             const ray = pixel.sub(camera_pos);
@@ -87,9 +88,9 @@ pub fn raySphereIntersection(camera_pos: Vec3, ray_dir: Vec3, sphere: Sphere) bo
     const cam_to_sphere = camera_pos.sub(sphere.center);
 
     // To find the t parameter we must solve a second-grade linear equation with the following parameters:
-    const a: f32 = 1.0; // If the ray dir is normalized, otherwise it's equal to: dot(dir, dir);
+    const a: Float = 1.0; // If the ray dir is normalized, otherwise it's equal to: dot(dir, dir);
     const b = dot(ray_dir.scalarMul(2.0), camera_pos.sub(sphere.center));
     const c = dot(cam_to_sphere, cam_to_sphere) - r * r;
 
-    return evaluateDiscriminant(f32, a, b, c);
+    return evaluateDiscriminant(Float, a, b, c);
 }

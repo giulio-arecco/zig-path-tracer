@@ -10,6 +10,10 @@ pub const FillMethod = union(enum) {
     gradient: Gradient(f32)
 };
 
+pub fn computePpmP6HeaderSize(comptime max_size: u16, comptime img_width: usize, comptime img_height: usize) usize {
+    return std.fmt.count("P6\n{d} {d}\n{d}\n", .{ img_width, img_height, max_size });
+}
+
 /// Writes on the passed in file to create a circle in the PPM P6 image format
 pub fn drawCircle(io: std.Io, file: std.Io.File, img_height: u16, img_width: u16, center_x: u16, center_y: u16, radius: u16, fill: FillMethod, bg_color: Color) !void {
     std.debug.assert(radius > 0);
@@ -121,6 +125,25 @@ fn createFileWithSuffix(io: std.Io, dir: std.Io.Dir, comptime sub_path: []const 
     const filename_with_suffix = try std.fmt.bufPrint(&buf, "{s}{d}{s}", .{ filename, top_idx, filext });
 
     return try file_dir.createFile(io, filename_with_suffix, .{ .exclusive = true });
+}
+
+test "Compute PPM P6 header size" {
+    try std.testing.expectEqual(9, computePpmP6HeaderSize(1, 1, 1));
+    try std.testing.expectEqual(10, computePpmP6HeaderSize(1, 1, 10));
+    try std.testing.expectEqual(11, computePpmP6HeaderSize(1, 10, 10));
+    try std.testing.expectEqual(14, computePpmP6HeaderSize(1, 100, 1000));
+    try std.testing.expectEqual(10, computePpmP6HeaderSize(10, 1, 1));
+    try std.testing.expectEqual(11, computePpmP6HeaderSize(10, 1, 10));
+    try std.testing.expectEqual(12, computePpmP6HeaderSize(10, 10, 10));
+    try std.testing.expectEqual(15, computePpmP6HeaderSize(10, 100, 1000));
+    try std.testing.expectEqual(11, computePpmP6HeaderSize(100, 1, 1));
+    try std.testing.expectEqual(12, computePpmP6HeaderSize(100, 1, 10));
+    try std.testing.expectEqual(13, computePpmP6HeaderSize(100, 10, 10));
+    try std.testing.expectEqual(16, computePpmP6HeaderSize(100, 100, 1000));
+    try std.testing.expectEqual(12, computePpmP6HeaderSize(1000, 1, 1));
+    try std.testing.expectEqual(13, computePpmP6HeaderSize(1000, 1, 10));
+    try std.testing.expectEqual(14, computePpmP6HeaderSize(1000, 10, 10));
+    try std.testing.expectEqual(17, computePpmP6HeaderSize(1000, 100, 1000));
 }
 
 test "Create dir and file" {

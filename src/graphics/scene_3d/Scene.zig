@@ -83,6 +83,8 @@ pub fn drawSphere(sceneData: Scene, writer: anytype) !void {
 
 /// Parameter `ray_dir` must be normalized.
 pub fn raySphereIntersection(camera_pos: Vec3, ray_dir: Vec3, sphere: Sphere) bool {
+    std.debug.assert(ray_dir.isNormalized());
+
     // Intersection between a ray and a sphere (implicit eq: (x - x_c)^2 + (y - y_c)^2 + (z - z_c)^2 = r^2, parametric eq: (P - C)^2 - r^2 = 0)\
     const r = sphere.radius;
     const cam_to_sphere = camera_pos.sub(sphere.center);

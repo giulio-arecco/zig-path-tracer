@@ -1,5 +1,5 @@
-const Scene = @import("scene_3d/Scene.zig");
-const Camera = @import("scene_3d/Camera.zig");
+pub const Scene = @import("scene_3d/Scene.zig");
+pub const Camera = @import("scene_3d/Camera.zig");
 
 test {
     _ = @import("scene_3d/Scene.zig");

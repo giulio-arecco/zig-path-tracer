@@ -29,12 +29,12 @@ pub fn isNormalized(v: Vec3) bool {
     return false;
 }
 
-pub fn normalized(v: Vec3) !Vec3 {
+pub fn normalized(v: Vec3) Vec3 {
+    std.debug.assert(v.x != 0.0 or v.y != 0.0 or v.z != 0.0);
+
     if (isNormalized(v)) return v;
 
     const m = magnitude(v);
-    if (m == 0.0) return error.DivisionByZero;
-
     return .{ .x = v.x / m, .y = v.y / m,  .z = v.z / m };
 }
 
@@ -87,8 +87,9 @@ pub fn scalarMul (v: Vec3, t: FType) Vec3 {
     };
 }
 
-pub fn scalarDiv (v: Vec3, t: FType) !Vec3 {
-    if (t == 0.0) return error.DivisionByZero;
+pub fn scalarDiv (v: Vec3, t: FType) Vec3 {
+    std.debug.assert(t != 0.0);
+
     return .{
         .x = v.x / t,
         .y = v.y / t,
@@ -115,11 +116,12 @@ pub fn vectorIsNormalized(v: @Vector(3, FType)) bool {
     return false;
 }
 
-pub fn vectorNormalized(v: @Vector(3, FType)) !@Vector(3, FType) {
+pub fn vectorNormalized(v: @Vector(3, FType)) @Vector(3, FType) {
+    std.debug.assert(v[0] != 0.0 or v[1] != 0.0 or v[2] != 0.0);
+
     if (vectorIsNormalized(v)) return v;
 
     const m = vectorMagnitude(v);
-    if (m == 0.0) return error.DivisionByZero;
 
     const mv: @Vector(3, FType) = @splat(m);
     return v / mv;
@@ -360,44 +362,41 @@ test "scalarMul" {
 
 test "scalarDiv" {
     var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
-    var t: FType = 0.0;
-    try std.testing.expectError(error.DivisionByZero, a.scalarDiv(t));
-
-    t = 2.0;
-    var b = try a.scalarDiv(t);
+    var t: f32 = 2.0;
+    var b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(-2.5, b.x, eps);
     try std.testing.expectApproxEqAbs(5.0, b.y, eps);
     try std.testing.expectApproxEqAbs(1.5, b.z, eps);
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
-    b = try a.scalarDiv(t);
+    b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
     try std.testing.expectApproxEqAbs(0.0, b.y, eps);
     try std.testing.expectApproxEqAbs(0.0, b.z, eps);
 
     a = Vec3 { .x = inf, .y = inf, .z = -inf};
     t = 1.0;
-    b = try a.scalarDiv(t);
+    b = a.scalarDiv(t);
     try std.testing.expect(isPositiveInf(b.x));
     try std.testing.expect(isPositiveInf(b.y));
     try std.testing.expect(isNegativeInf(b.z));
 
     t = -inf;
-    b = try a.scalarDiv(t);
+    b = a.scalarDiv(t);
     try std.testing.expect(isNan(b.x));
     try std.testing.expect(isNan(b.y));
     try std.testing.expect(isNan(b.z));
 
     a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0};
     t = inf;
-    b = try a.scalarDiv(t);
+    b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
     try std.testing.expectApproxEqAbs(0.0, b.y, eps);
     try std.testing.expectApproxEqAbs(0.0, b.z, eps);
 
     a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
     t = -inf;
-    b = try a.scalarDiv(t);
+    b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
     try std.testing.expectApproxEqAbs(0.0, b.y, eps);
     try std.testing.expectApproxEqAbs(0.0, b.z, eps);
@@ -459,18 +458,15 @@ test "isNormalized" {
 }
 
 test "normalized" {
-    var v = Vec3 { .x = 0.0, .y = 0.0, .z = -0.0};
-    try std.testing.expectError(error.DivisionByZero, v.normalized());
-
-    v = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
-    var n = try v.normalized();
+    var v = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
+    var n = v.normalized();
     try std.testing.expectApproxEqAbs(v.x / std.math.sqrt(134.0), n.x, eps);
     try std.testing.expectApproxEqAbs(v.y / std.math.sqrt(134.0), n.y, eps);
     try std.testing.expectApproxEqAbs(v.z / std.math.sqrt(134.0), n.z, eps);
     try std.testing.expectApproxEqAbs(1.0, std.math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z), eps);
 
     v = Vec3 { .x = inf, .y = inf, .z = -inf};
-    n = try v.normalized();
+    n = v.normalized();
     try std.testing.expect(isNan(n.x));
     try std.testing.expect(isNan(n.y));
     try std.testing.expect(isNan(n.z));
@@ -612,18 +608,15 @@ test "vectorIsNormalized" {
 }
 
 test "vectorNormalized" {
-    var v = @Vector(3, FType) { 0.0, 0.0, -0.0};
-    try std.testing.expectError(error.DivisionByZero, vectorNormalized(v));
-
-    v = @Vector(3, FType) { -5.0, 10.0, 3.0};
-    var n = try vectorNormalized(v);
+    var v = @Vector(3, FType) { -5.0, 10.0, 3.0};
+    var n = vectorNormalized(v);
     try std.testing.expectApproxEqAbs(v[0] / std.math.sqrt(134.0), n[0], eps);
     try std.testing.expectApproxEqAbs(v[1] / std.math.sqrt(134.0), n[1], eps);
     try std.testing.expectApproxEqAbs(v[2] / std.math.sqrt(134.0), n[2], eps);
     try std.testing.expectApproxEqAbs(1.0, std.math.sqrt(@reduce(.Add, n*n)), eps);
 
     v = @Vector(3, FType) { inf, inf, -inf};
-    n = try vectorNormalized(v);
+    n = vectorNormalized(v);
     try std.testing.expect(isNan(n[0]));
     try std.testing.expect(isNan(n[1]));
     try std.testing.expect(isNan(n[2]));

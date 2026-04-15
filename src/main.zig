@@ -58,7 +58,10 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
-    _ = @import("graphics/color.zig");
+    _ = @import("math_utils.zig");
     _ = @import("fs_utils.zig");
     _ = @import("Vec3.zig");
+
+    _ = @import("graphics/color.zig");
+    _ = @import("graphics/scene_3d.zig");
 }

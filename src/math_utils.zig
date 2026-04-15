@@ -22,7 +22,7 @@ pub fn approxEq(comptime T: type, x: T, y: T) bool {
             if (std.math.approxEqAbs(T, x, y, 2 * floatEps(T))) {
                 return true;
             }
-            // If the absolute difference is too big, resort to relative equality
+            // If the absolute difference is too big, try relative equality
             return std.math.approxEqRel(T, x, y, @sqrt(floatEps(T)));
         },
         .int, .comptime_int => return x == y,

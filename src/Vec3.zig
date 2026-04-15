@@ -71,7 +71,7 @@ pub fn distance(a: Vec3, b: Vec3) FType {
     return magnitude(a.sub(b));
 }
 
-pub fn isEqual(self: Vec3, other: Vec3) bool {
+pub fn isApproxEq(self: Vec3, other: Vec3) bool {
     const x_equal = math_utils.approxEq(FType, self.x, other.x);
     const y_equal = math_utils.approxEq(FType, self.y, other.y);
     const z_equal = math_utils.approxEq(FType, self.z, other.z);
@@ -264,43 +264,43 @@ test "sub" {
 test "isEqual" {
     var a = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
     var b = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
-    try std.testing.expect(isEqual(a, b));
+    try std.testing.expect(isApproxEq(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
-    try std.testing.expect(isEqual(a, b));
+    try std.testing.expect(isApproxEq(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = -0.0, .y = 0.0, .z = -0.0};
-    try std.testing.expect(isEqual(a, b));
+    try std.testing.expect(isApproxEq(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = -1.0, .y = 0.0, .z = 0.0};
-    try std.testing.expect(!isEqual(a, b));
+    try std.testing.expect(!isApproxEq(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = 0.0, .y = 5.0, .z = 0.0};
-    try std.testing.expect(!isEqual(a, b));
+    try std.testing.expect(!isApproxEq(a, b));
 
     a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
     b = Vec3 { .x = 0.0, .y = 0.0, .z = -12.0};
-    try std.testing.expect(!isEqual(a, b));
+    try std.testing.expect(!isApproxEq(a, b));
 
     a = Vec3 { .x = inf, .y = inf, .z = inf};
     b = Vec3 { .x = inf, .y = inf, .z = inf};
-    try std.testing.expect(isEqual(a, b));
+    try std.testing.expect(isApproxEq(a, b));
 
     a = Vec3 { .x = -inf, .y = -inf, .z = -inf};
     b = Vec3 { .x = -inf, .y = -inf, .z = -inf};
-    try std.testing.expect(isEqual(a, b));
+    try std.testing.expect(isApproxEq(a, b));
 
     a = Vec3 { .x = inf, .y = inf, .z = inf};
     b = Vec3 { .x = -inf, .y = inf, .z = inf};
-    try std.testing.expect(!isEqual(a, b));
+    try std.testing.expect(!isApproxEq(a, b));
 
     a = Vec3 { .x = nan, .y = nan, .z = nan};
     b = Vec3 { .x = nan, .y = nan, .z = nan};
-    try std.testing.expect(!isEqual(a, b));
+    try std.testing.expect(!isApproxEq(a, b));
 }
 
 test "scalarMul" {

@@ -1,4 +1,6 @@
 images/
+.github/
 .zig-cache/
 zig-out/
+*.code-workspace
 *.o

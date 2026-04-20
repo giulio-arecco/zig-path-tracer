@@ -92,4 +92,5 @@ test {
 
     _ = @import("graphics/color.zig");
     _ = @import("graphics/scene_3d.zig");
+    _ = @import("graphics/scene_3d/Ray.zig");
 }

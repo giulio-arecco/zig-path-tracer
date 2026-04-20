@@ -4,3 +4,4 @@ images/
 zig-out/
 *.code-workspace
 *.o
+TODO.md

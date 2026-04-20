@@ -1,14 +1,18 @@
 const Scene = @This();
 
 const std = @import("std");
+const rendering = @import("rendering.zig");
+const config = @import("../../config.zig");
+const math_utils = @import("../../math_utils.zig");
+
 const Vec3 = @import("../../Vec3.zig");
 const Ray = @import("Ray.zig");
 const Camera = @import("Camera.zig");
-const Float = @import("../../config.zig").Float;
-const math_utils = @import("../../math_utils.zig");
+const RenderSettings = rendering.RenderSettings;
+const Float = config.Float;
+
 const approxEq = math_utils.approxEq;
 const evaluateDiscriminant = math_utils.evaluateDiscriminant;
-
 const dot = Vec3.dot;
 
 pub const Sphere = struct {
@@ -19,11 +23,8 @@ pub const Sphere = struct {
 camera: Camera,
 // shapes: []const Sphere, //TODO: Possibly make this dynamically allocated so that it can be interacted with at runtime
 sphere: Sphere,
-screen_width: u16,
-screen_height: u16,
 
-
-pub fn drawSphere(sceneData: Scene, writer: anytype) !void {
+pub fn drawSphere(sceneData: Scene, settings: RenderSettings, writer: anytype) !void {
     comptime {
         const WriterType = @TypeOf(writer);
 
@@ -47,8 +48,8 @@ pub fn drawSphere(sceneData: Scene, writer: anytype) !void {
     const camera_up = sceneData.camera._up;
     const camera_right = sceneData.camera._right;
     const camera_forward = sceneData.camera._forward;
-    const screen_width = sceneData.screen_width;
-    const screen_height = sceneData.screen_height;
+    const screen_width = settings.image_width;
+    const screen_height = settings.image_height;
 
     // See the Camera docs to understand where the '-' comes from (it has to do with the camera's forward direction)
     const screen_center = camera_pos.add(camera_forward.scalarMul(-focal_distance));
@@ -73,7 +74,7 @@ pub fn drawSphere(sceneData: Scene, writer: anytype) !void {
                 .dir = pixel.sub(camera_pos).normalized(),
             };
 
-            if (raySphereIntersection(camera_pos, ray, sceneData.sphere)) {
+            if (raySphereIntersection(ray, sceneData.sphere)) {
                 try writer.writeInt(u24, 0xFF_FF_FF, .big); // White pixel in PPM P6
             }
             else {
@@ -86,17 +87,17 @@ pub fn drawSphere(sceneData: Scene, writer: anytype) !void {
 }
 
 /// Parameter `ray_dir` must be normalized.
-pub fn raySphereIntersection(camera_pos: Vec3, ray: Ray, sphere: Sphere) bool {
+pub fn raySphereIntersection(ray: Ray, sphere: Sphere) bool {
     std.debug.assert(ray.dir.isNormalized());
 
     // Intersection between a ray and a sphere (implicit eq: (x - x_c)^2 + (y - y_c)^2 + (z - z_c)^2 = r^2, parametric eq: (P - C)^2 - r^2 = 0)\
     const r = sphere.radius;
-    const cam_to_sphere = camera_pos.sub(sphere.center);
+    const eye_to_sphere = ray.origin.sub(sphere.center);
 
     // To find the t parameter we must solve a second-grade linear equation with the following parameters:
     const a: Float = 1.0; // If the ray dir is normalized, otherwise it's equal to: dot(dir, dir);
-    const b = dot(ray.dir.scalarMul(2.0), camera_pos.sub(sphere.center));
-    const c = dot(cam_to_sphere, cam_to_sphere) - r * r;
+    const b = dot(ray.dir.scalarMul(2.0), ray.origin.sub(sphere.center));
+    const c = dot(eye_to_sphere, eye_to_sphere) - r * r;
 
     return evaluateDiscriminant(Float, a, b, c);
 }

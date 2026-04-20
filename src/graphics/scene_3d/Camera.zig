@@ -12,11 +12,12 @@ const Camera = @This();
 
 const std = @import("std");
 const Vec3 = @import("../../Vec3.zig");
+const Float = @import("../../config.zig").Float;
 const normalized = Vec3.normalized;
 const sub = Vec3.sub;
 const cross = Vec3.cross;
 
-focal_distance: f16,
+focal_distance: Float,
 /// The position of the camera. Treat as **immutable**.
 _pos: Vec3,
 /// The camera's up vector. Treat as **immutable**.
@@ -26,7 +27,7 @@ _right: Vec3,
 /// The camera's forward vector. Treat as **immutable**.
 _forward: Vec3,
 
-pub fn init(pos: Vec3, up: Vec3, right: Vec3, focal_distance: f16) Camera {
+pub fn init(pos: Vec3, up: Vec3, right: Vec3, focal_distance: Float) Camera {
     const norm_up = normalized(up);
     const norm_right = normalized(right);
 
@@ -39,13 +40,13 @@ pub fn init(pos: Vec3, up: Vec3, right: Vec3, focal_distance: f16) Camera {
     };
 }
 
-pub fn initLookAt (from: Vec3, to: Vec3, focal_distance: f16) Camera {
+pub fn initLookAt (from: Vec3, to: Vec3) Camera {
     const forward = normalized(sub(from, to));
-    const right = cross(.{ .x = 0.0, .y = 1.0, .z = 0.0 }, forward);
+    const right = cross(.{ .x = 0.0, .y = 1.0, .z = 0.0 }, forward); // TODO: Make sure the random vec and forward are not orthogonal
     const up = cross(forward, right);
 
     return Camera {
-        .focal_distance = focal_distance,
+        .focal_distance = from.distance(to),
         ._pos = from,
         ._up = up,
         ._right = right,
@@ -75,8 +76,8 @@ test "init" {
     try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
 
     up = Vec3 { .x = 0.0, .y = std.math.sqrt1_2, .z = std.math.sqrt1_2 };
-    camera = init(pos, up, right, std.math.floatMax(f16));
-    try std.testing.expectEqual(std.math.floatMax(f16), camera.focal_distance);
+    camera = init(pos, up, right, std.math.floatMax(Float));
+    try std.testing.expectEqual(std.math.floatMax(Float), camera.focal_distance);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, up));
     try std.testing.expect(Vec3.isApproxEq(camera._right, right));
@@ -84,8 +85,8 @@ test "init" {
 
     up = Vec3 { .x = 0.0, .y = 1.0, .z = 0.0 };
     right = Vec3 { .x = std.math.sqrt1_2, .y = 0.0, .z = std.math.sqrt1_2 };
-    camera = init(pos, up, right, std.math.floatMax(f16));
-    try std.testing.expectEqual(std.math.floatMax(f16), camera.focal_distance);
+    camera = init(pos, up, right, std.math.floatMax(Float));
+    try std.testing.expectEqual(std.math.floatMax(Float), camera.focal_distance);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, up));
     try std.testing.expect(Vec3.isApproxEq(camera._right, right));
@@ -94,30 +95,30 @@ test "init" {
 
 test "initLookAt" {
     const pos = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
-    var camera = initLookAt(pos, .{ .x = 0.0, .y = 0.0, .z = -50.0 }, std.math.floatMax(f16));
-    try std.testing.expectEqual(std.math.floatMax(f16), camera.focal_distance);
+    var camera = initLookAt(pos, .{ .x = 0.0, .y = 0.0, .z = -50.0 }, std.math.floatMax(Float));
+    try std.testing.expectEqual(std.math.floatMax(Float), camera.focal_distance);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
     try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));
     try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
 
-    camera = initLookAt(pos, .{ .x = @cos(pi/4.0), .y = 0, .z = @sin(pi/4.0) }, std.math.floatMax(f16));
+    camera = initLookAt(pos, .{ .x = @cos(pi/4.0), .y = 0, .z = @sin(pi/4.0) }, std.math.floatMax(Float));
 
-    try std.testing.expectEqual(std.math.floatMax(f16), camera.focal_distance);
+    try std.testing.expectEqual(std.math.floatMax(Float), camera.focal_distance);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, .{ .x = 0.0, .y = 0.0, .z = 0.0 }));
     try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
     try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = -std.math.sqrt1_2, .y = 0.0, .z = std.math.sqrt1_2 }));
     try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = -std.math.sqrt1_2, .y = 0.0, .z = -std.math.sqrt1_2 }));
 
-    camera = initLookAt(pos, .{ .x = 0.0, .y = 1.0, .z = -50.0 }, std.math.floatMax(f16));
-    try std.testing.expectEqual(std.math.floatMax(f16), camera.focal_distance);
+    camera = initLookAt(pos, .{ .x = 0.0, .y = 1.0, .z = -50.0 }, std.math.floatMax(Float));
+    try std.testing.expectEqual(std.math.floatMax(Float), camera.focal_distance);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(!Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
     try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));
     try std.testing.expect(!Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
 
-    camera = initLookAt(pos, .{ .x = 1.0, .y = 0.0, .z = -50.0 }, std.math.floatMax(f16));
-    try std.testing.expectEqual(std.math.floatMax(f16), camera.focal_distance);
+    camera = initLookAt(pos, .{ .x = 1.0, .y = 0.0, .z = -50.0 }, std.math.floatMax(Float));
+    try std.testing.expectEqual(std.math.floatMax(Float), camera.focal_distance);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
     try std.testing.expect(!Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));

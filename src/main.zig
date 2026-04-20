@@ -1,12 +1,14 @@
 const std = @import("std");
-const scene_3d = @import("graphics/scene_3d.zig");
-const Color = @import("graphics/color.zig");
+const graphics = @import("graphics.zig");
 const fs_utils = @import("fs_utils.zig");
 
-const Scene = scene_3d.Scene;
-const Camera = scene_3d.Camera;
+const Color = graphics.Color;
+const Scene = graphics.scene_3d.Scene;
+const Camera = graphics.scene_3d.Camera;
+const RenderSettings = graphics.scene_3d.rendering.RenderSettings;
 const FillMethod = fs_utils.FillMethod;
-const Gradient = Color.Gradient;
+const Gradient = graphics.Gradient;
+
 const print = std.debug.print;
 const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
@@ -77,20 +79,20 @@ pub fn main(init: std.process.Init) !void {
             .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
             .radius = 5.0
         },
-        .screen_height = IMG_HEIGHT,
-        .screen_width = IMG_WIDTH
     };
 
-    try fs_utils.writePpmP6Header(writer, 255, IMG_WIDTH, IMG_HEIGHT);
-    try Scene.drawSphere(scene, writer);
+    const renderSettings = RenderSettings {
+        .image_width = IMG_WIDTH,
+        .image_height = IMG_HEIGHT
+    };
+
+    try fs_utils.writePpmP6Header(writer, 255, renderSettings.image_width, renderSettings.image_height);
+    try Scene.drawSphere(scene, renderSettings, writer);
 }
 
 test {
     _ = @import("math_utils.zig");
     _ = @import("fs_utils.zig");
+    _ = @import("graphics.zig");
     _ = @import("Vec3.zig");
-
-    _ = @import("graphics/color.zig");
-    _ = @import("graphics/scene_3d.zig");
-    _ = @import("graphics/scene_3d/Ray.zig");
 }

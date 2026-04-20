@@ -24,7 +24,7 @@ camera: Camera,
 // shapes: []const Sphere, //TODO: Possibly make this dynamically allocated so that it can be interacted with at runtime
 sphere: Sphere,
 
-pub fn drawSphere(sceneData: Scene, settings: RenderSettings, writer: anytype) !void {
+pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void {
     comptime {
         const WriterType = @TypeOf(writer);
 
@@ -35,7 +35,7 @@ pub fn drawSphere(sceneData: Scene, settings: RenderSettings, writer: anytype) !
 
         switch (@typeInfo(ActualType)) {
             .@"struct" => {
-                if (!@hasDecl(ActualType, "write")) {
+                if (!@hasDecl(ActualType, "writeInt")) {
                     @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'write' method.");
                 }
             },
@@ -43,38 +43,25 @@ pub fn drawSphere(sceneData: Scene, settings: RenderSettings, writer: anytype) !
         }
     }
 
-    const focal_distance = sceneData.camera.focal_distance;
-    const camera_pos = sceneData.camera._pos;
-    const camera_up = sceneData.camera._up;
-    const camera_right = sceneData.camera._right;
-    const camera_forward = sceneData.camera._forward;
-    const screen_width = settings.image_width;
-    const screen_height = settings.image_height;
+    const camera = scene.camera;
+    const image_width = settings.image_width;
+    const image_height = settings.image_height;
 
-    // See the Camera docs to understand where the '-' comes from (it has to do with the camera's forward direction)
-    const screen_center = camera_pos.add(camera_forward.scalarMul(-focal_distance));
-    std.debug.print("Screen Center: {}.\n", .{screen_center});
+    std.debug.print("Viewport Center: {}.\n", .{camera._viewport_center});
+    std.debug.print("First pixel position: {}\n", .{camera._pixel_top_left});
 
-    const screen_top_left = screen_center.
-        sub(camera_right.scalarMul(@floatFromInt(@as(i24, screen_width / 2)))).
-        add(camera_up.scalarMul(@floatFromInt(@as(i24, screen_height / 2))));
-
-    std.debug.print("Screen Top Left: {}.\n", .{screen_top_left});
-
-    for (0..screen_height) |y_screen| {
-        for (0..screen_width) |x_screen| {
-            // Pixel center
-            const u = @as(Float, @floatFromInt(x_screen)) + 0.5;
-            const v = @as(Float, @floatFromInt(y_screen)) + 0.5;
-
-            const pixel = screen_top_left.add(camera_right.scalarMul(u)).sub(camera_up.scalarMul(v));
+    for (0..image_height) |y_screen| {
+        for (0..image_width) |x_screen| {
+            const pixel = camera._pixel_top_left.
+                add(camera._pixel_delta_u.scalarMul(@floatFromInt(x_screen))).
+                add(camera._pixel_delta_v.scalarMul(@floatFromInt(y_screen)));
 
             const ray = Ray {
-                .origin = camera_pos,
-                .dir = pixel.sub(camera_pos).normalized(),
+                .origin = camera._pos,
+                .dir = pixel.sub(camera._pos).normalized(),
             };
 
-            if (raySphereIntersection(ray, sceneData.sphere)) {
+            if (raySphereIntersection(ray, scene.sphere)) {
                 try writer.writeInt(u24, 0xFF_FF_FF, .big); // White pixel in PPM P6
             }
             else {

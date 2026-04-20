@@ -13,8 +13,8 @@ const print = std.debug.print;
 const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
 
-const IMG_HEIGHT= 48;
-const IMG_WIDTH = 64;
+const IMG_HEIGHT= 512;
+const IMG_WIDTH = 512;
 // const CIRCLE_CENTER_X = 128;
 // const CIRCLE_CENTER_Y = 128;
 // const CIRCLE_RADIUS = 64;
@@ -69,25 +69,29 @@ pub fn main(init: std.process.Init) !void {
     var file_writer = file.writer(init.io, &buf);
     const writer = &file_writer.interface;
 
+    const render_settings = RenderSettings {
+        .image_width = IMG_WIDTH,
+        .image_height = IMG_HEIGHT
+    };
+
     const scene = Scene {
         .camera = Camera.init(
             .{.x = 0.0, .y = 0.0, .z = 20.0},
             .{.x = 0.0, .y = 1.0, .z = 0.0},
             .{.x = 1.0, .y = 0.0, .z = 0.0},
-            10.0),
+            10.0,
+            90.0,
+            render_settings
+        ),
         .sphere = Scene.Sphere {
             .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
             .radius = 5.0
         },
     };
 
-    const renderSettings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT
-    };
 
-    try fs_utils.writePpmP6Header(writer, 255, renderSettings.image_width, renderSettings.image_height);
-    try Scene.drawSphere(scene, renderSettings, writer);
+    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
+    try Scene.drawSphere(scene, render_settings, writer);
 }
 
 test {

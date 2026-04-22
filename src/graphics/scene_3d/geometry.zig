@@ -65,8 +65,8 @@ pub const HitRecord = struct {
     pub fn determineNormalOrientation(ray: Ray, outward_normal: Vec3) struct { bool, Vec3 } {
         std.debug.assert(outward_normal.isNormalized());
 
-        const front_face = dot(ray.dir, outward_normal) < 0; // TODO: Add floating point approx
-        const normal = if (front_face) outward_normal else outward_normal.scalarMul(-1.0);
+        const front_face = dot(ray.dir, outward_normal) < 0.0;
+        const normal = if (front_face) outward_normal else outward_normal.negated();
 
         return .{ front_face, normal };
     }

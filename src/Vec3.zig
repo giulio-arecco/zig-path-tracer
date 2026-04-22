@@ -78,11 +78,19 @@ pub fn isApproxEq(self: Vec3, other: Vec3) bool {
     return x_equal and y_equal and z_equal;
 }
 
-pub fn scalarMul (v: Vec3, t: Float) Vec3 {
+pub fn scalarMul(v: Vec3, t: Float) Vec3 {
     return .{
         .x = v.x * t,
         .y = v.y * t,
         .z = v.z * t
+    };
+}
+
+pub fn negated(v: Vec3) Vec3 {
+    return .{
+        .x = -v.x,
+        .y = -v.y,
+        .z = -v.z
     };
 }
 
@@ -357,6 +365,26 @@ test "scalarMul" {
     try std.testing.expect(isNegativeInf(b.x));
     try std.testing.expect(isNegativeInf(b.y));
     try std.testing.expect(isNegativeInf(b.z));
+}
+
+test "negated" {
+    var a = Vec3{ .x = -5.0, .y = 10.0, .z = 3.0 };
+    var b = a.negated();
+    try std.testing.expectApproxEqAbs(5.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(-10.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(-3.0, b.z, eps);
+
+    a = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    b = a.negated();
+    try std.testing.expectApproxEqAbs(0.0, b.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, b.z, eps);
+
+    a = Vec3{ .x = inf, .y = -inf, .z = nan };
+    b = a.negated();
+    try std.testing.expect(isNegativeInf(b.x));
+    try std.testing.expect(isPositiveInf(b.y));
+    try std.testing.expect(isNan(b.z));
 }
 
 test "scalarDiv" {

@@ -60,12 +60,12 @@ pub const HitRecord = struct {
     normal: Vec3,
     front_face: bool,
 
-    /// Determines a normal vector orientation.\
+    /// Determines a normal vector orientation. The resulting normal will always point against the ray.\
     /// **NOTE**: The parameter `outward_normal` is assumed to be normalized.
     pub fn determineNormalOrientation(ray: Ray, outward_normal: Vec3) struct { bool, Vec3 } {
         std.debug.assert(outward_normal.isNormalized());
 
-        const front_face = dot(ray.dir, outward_normal) < 0;
+        const front_face = dot(ray.dir, outward_normal) < 0; // TODO: Add floating point approx
         const normal = if (front_face) outward_normal else outward_normal.scalarMul(-1.0);
 
         return .{ front_face, normal };

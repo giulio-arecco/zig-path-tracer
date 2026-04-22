@@ -5,10 +5,14 @@ const rendering = @import("rendering.zig");
 const config = @import("../../config.zig");
 const math_utils = @import("../../math_utils.zig");
 const geometry = @import("geometry.zig");
+const color = @import("../color.zig");
 
 const Vec3 = @import("../../Vec3.zig");
 const Ray = @import("Ray.zig");
 const Camera = @import("Camera.zig");
+const Color = color.Color;
+const Gradient = color.Gradient;
+const HitRecord = geometry.HitRecord;
 const Sphere = geometry.Sphere;
 const Hittable = geometry.Hittable;
 const RenderSettings = rendering.RenderSettings;
@@ -43,16 +47,32 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
                 .dir = pixel.sub(camera._pos),
             };
 
-            if (scene.hittable.hit(ray, 0.0, std.math.inf(Float)) != null) {
-                try writer.writeInt(u24, 0xFF_FF_FF, .big); // White pixel in PPM P6
-            }
-            else {
-                try writer.writeInt(u24, 0x00_00_00, .big); // Black Pixel in PPM P6
-            }
+            const hit = scene.hittable.hit(ray, 0.0, std.math.inf(Float));
+            const pixel_color = try ray_color(ray, hit);
+            try writer.writeInt(u24, pixel_color.toPacked(), .big); // White pixel in PPM P6
         }
     }
 
    try writer.flush();
+}
+
+fn ray_color(ray: Ray, hit: ?HitRecord) !Color {
+    if (hit) |record| {
+        return Color {
+            .r = @intFromFloat(0.5 * (record.normal.x + 1.0) * 255.999),
+            .g = @intFromFloat(0.5 * (record.normal.y + 1.0) * 255.999),
+            .b = @intFromFloat(0.5 * (record.normal.z + 1.0) * 255.999)
+        };
+    }
+
+    const grad = Gradient(Float) {
+        .start_color = .{ .r = 255, .g = 255, .b = 255 },
+        .end_color = .{ .r = 128, .g = 180, .b = 255 }
+    };
+
+    const norm_dir = ray.dir.normalized();
+    const t = 0.5 * (norm_dir.y + 1.0);
+    return try grad.at(t);
 }
 
 fn assertHasWriteInt(WriterType: type) void {

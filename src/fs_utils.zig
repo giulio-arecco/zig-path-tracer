@@ -59,7 +59,7 @@ pub fn drawCircle(io: std.Io, file: std.Io.File, img_height: u16, img_width: u16
             else {
                 switch (fill) {
                     .color => |c| try writer.writeInt(u24, c.toPacked(), .big),
-                    .gradient => |g| try writer.writeInt(u24, try g.evalPacked(@floatFromInt(x)), .big)
+                    .gradient => |g| try writer.writeInt(u24, try g.atPacked(@floatFromInt(x)), .big)
                 }
             }
         }

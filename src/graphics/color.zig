@@ -24,8 +24,8 @@ pub fn Gradient(comptime T: type) type {
         min_t: T = 0.0,
         max_t: T = 1.0,
 
-        pub fn eval(self: @This(), t: T) !Color {
-            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
+        pub fn at(self: @This(), t: T) !Color {
+            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange; // TODO: make this an assertion
 
             const norm_t = try self.normalize(t);
             const start_r = @as(T, @floatFromInt(self.start_color.r));
@@ -42,13 +42,13 @@ pub fn Gradient(comptime T: type) type {
             };
         }
 
-        pub fn evalPacked(self: @This(), t: T) !u24 {
-            const color = try self.eval(t);
+        pub fn atPacked(self: @This(), t: T) !u24 {
+            const color = try self.at(t);
             return color.toPacked();
         }
 
         fn normalize(self: @This(), t: T) !T {
-            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange;
+            if (t < self.min_t or t > self.max_t ) return error.GradientValueOutOfRange; // TODO: make this an assertion
             return (t - self.min_t) / (self.max_t - self.min_t);
         }
     };
@@ -66,11 +66,11 @@ test "Gradient - Out of range values" {
         .end_color = .{ .r = 255, .g = 128, .b = 64 },
     };
 
-    try std.testing.expectError(error.GradientValueOutOfRange, g.eval(1.1));
-    try std.testing.expectError(error.GradientValueOutOfRange, g.evalPacked(1.1));
+    try std.testing.expectError(error.GradientValueOutOfRange, g.at(1.1));
+    try std.testing.expectError(error.GradientValueOutOfRange, g.atPacked(1.1));
     try std.testing.expectError(error.GradientValueOutOfRange, g.normalize(1.1));
-    try std.testing.expectError(error.GradientValueOutOfRange, g.eval(-0.1));
-    try std.testing.expectError(error.GradientValueOutOfRange, g.evalPacked(-0.1));
+    try std.testing.expectError(error.GradientValueOutOfRange, g.at(-0.1));
+    try std.testing.expectError(error.GradientValueOutOfRange, g.atPacked(-0.1));
     try std.testing.expectError(error.GradientValueOutOfRange, g.normalize(-0.1));
 }
 
@@ -80,9 +80,9 @@ test "Gradient - Ascending gradient eval" {
         .end_color = .{ .r = 255, .g = 128, .b = 64 },
     };
 
-    try std.testing.expectEqual(Color {.r = 0, .g = 0, .b = 0}, try g_asc.eval(0.0));
-    try std.testing.expectEqual(Color {.r = 128, .g = 64, .b = 32}, try g_asc.eval(0.5));
-    try std.testing.expectEqual(Color {.r = 255, .g = 128, .b = 64}, try g_asc.eval(1.0));
+    try std.testing.expectEqual(Color {.r = 0, .g = 0, .b = 0}, try g_asc.at(0.0));
+    try std.testing.expectEqual(Color {.r = 128, .g = 64, .b = 32}, try g_asc.at(0.5));
+    try std.testing.expectEqual(Color {.r = 255, .g = 128, .b = 64}, try g_asc.at(1.0));
 }
 
 test "Gradient - Ascending gradient evalPacked" {
@@ -91,9 +91,9 @@ test "Gradient - Ascending gradient evalPacked" {
         .end_color = .{ .r = 255, .g = 128, .b = 64 },
     };
 
-    try std.testing.expectEqual(0x0, try g_asc.evalPacked(0.0));
-    try std.testing.expectEqual(0x80_40_20, try g_asc.evalPacked(0.5));
-    try std.testing.expectEqual(0xFF_80_40, try g_asc.evalPacked(1.0));
+    try std.testing.expectEqual(0x0, try g_asc.atPacked(0.0));
+    try std.testing.expectEqual(0x80_40_20, try g_asc.atPacked(0.5));
+    try std.testing.expectEqual(0xFF_80_40, try g_asc.atPacked(1.0));
 }
 
 test "Gradient - Descending gradient eval" {
@@ -102,9 +102,9 @@ test "Gradient - Descending gradient eval" {
         .end_color = .{ .r = 0, .g = 0, .b = 0 },
     };
 
-    try std.testing.expectEqual(Color {.r = 255, .g = 128, .b = 64}, try g_desc.eval(0.0));
-    try std.testing.expectEqual(Color {.r = 128, .g = 64, .b = 32}, try g_desc.eval(0.5));
-    try std.testing.expectEqual(Color {.r = 0, .g = 0, .b = 0}, try g_desc.eval(1.0));
+    try std.testing.expectEqual(Color {.r = 255, .g = 128, .b = 64}, try g_desc.at(0.0));
+    try std.testing.expectEqual(Color {.r = 128, .g = 64, .b = 32}, try g_desc.at(0.5));
+    try std.testing.expectEqual(Color {.r = 0, .g = 0, .b = 0}, try g_desc.at(1.0));
 }
 
 test "Gradient - Descending gradient evalPacked" {
@@ -113,9 +113,9 @@ test "Gradient - Descending gradient evalPacked" {
         .end_color = .{ .r = 0, .g = 0, .b = 0 },
     };
 
-    try std.testing.expectEqual(0xFF_80_40, try g_desc.evalPacked(0.0));
-    try std.testing.expectEqual(0x80_40_20, try g_desc.evalPacked(0.5));
-    try std.testing.expectEqual(0x0, try g_desc.evalPacked(1.0));
+    try std.testing.expectEqual(0xFF_80_40, try g_desc.atPacked(0.0));
+    try std.testing.expectEqual(0x80_40_20, try g_desc.atPacked(0.5));
+    try std.testing.expectEqual(0x0, try g_desc.atPacked(1.0));
 }
 
 test "Gradient - Normalization" {

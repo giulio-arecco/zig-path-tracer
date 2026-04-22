@@ -30,15 +30,44 @@ pub fn approxEq(comptime T: type, x: T, y: T) bool {
     }
 }
 
-pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) bool {
+/// Evaluates a second-grade linear equation discriminant and returns a tuple containing the number of real roots and the computed discriminant.\
+/// 0: No real roots\
+/// 1: Repeated real root\
+/// 2: Two real roots
+pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) struct {u8, T} {
     //TODO: Consider checking if a or c ar == 1 to avoid a multiplication
     switch (@typeInfo(T)) {
-        .int, .comptime_int => {
-            const b_sq = b * b;
-            const four_ac = 4 * a * c;
-            const discr = b_sq - four_ac;
+        .int => |int_info| {
+            if (int_info.signedness == .unsigned) {
+                @compileError("The integer type T must be signed (i.e. i32), found '" ++ @typeName(T) ++ "'.");
+            }
 
-            return discr >= 0;
+            const b_sq = b * b;
+            const discr = b_sq - 4 * a * c;
+
+            if (discr > 0) {
+                return .{ 2, discr };
+            }
+            else if (discr == 0) {
+                return .{ 1, discr };
+            }
+            else {
+                return .{ 0, discr };
+            }
+        },
+        .comptime_int => {
+            const b_sq = b * b;
+            const discr = b_sq - 4 * a * c;
+
+            if (discr > 0) {
+                return .{ 2, discr };
+            }
+            else if (discr == 0) {
+                return .{ 1, discr };
+            }
+            else {
+                return .{ 0, discr };
+            }
         },
         .float, .comptime_float => {
             std.debug.assert(!std.math.isNan(a));
@@ -46,14 +75,87 @@ pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) bool {
             std.debug.assert(!std.math.isNan(c));
 
             const b_sq = b * b;
-            const four_ac = 4.0 * a * c;
-            const discr = b_sq - four_ac;
+            const discr = @mulAdd(T, -4.0 * a, c, b_sq);
 
-            const max_magnitude = @max(@abs(b_sq), @abs(four_ac));
+            const max_magnitude = @max(@abs(b_sq), @abs(4.0 * a * c));
             const tolerance: T = 2.0;
             const eps = std.math.floatEpsAt(T, max_magnitude) * tolerance;
 
-            return discr >= -eps;
+            if (discr > eps) {
+                return .{ 2, discr };
+            }
+            else if (discr >= -eps) {
+                return .{ 1, discr };
+            }
+            else {
+                return .{ 0, discr };
+            }
+        },
+        else => @compileError("Type parameter T must be float, comptime_float, int or comptime_int, received '" ++ @typeName(T) ++ "'.")
+    }
+}
+
+/// Evaluates a second-grade linear equation discriminant using the reduced formula and returns a tuple containing the number of real roots and the reduced discriminant (discr/4).\
+/// Note that `h` should be equal to half the b coefficient of a second-degree linear equation.\
+/// 0: No real roots\
+/// 1: Repeated real root\
+/// 2: Two real roots
+pub fn evaluateDiscriminantReduced(comptime T: type, a: T, h: T, c: T) struct {u8, T} {
+    //TODO: Consider checking if a or c ar == 1 to avoid a multiplication
+    switch (@typeInfo(T)) {
+        .int => |int_info| {
+            if (int_info.signedness == .unsigned) {
+                @compileError("The integer type T must be signed (i.e. i32), found '" ++ @typeName(T) ++ "'.");
+            }
+
+            const h_sq = h * h;
+            const discr = h_sq - a * c;
+
+            if (discr > 0) {
+                return .{ 2, discr };
+            }
+            else if (discr == 0) {
+                return .{ 1, discr };
+            }
+            else {
+                return .{ 0, discr };
+            }
+        },
+        .comptime_int => {
+            const h_sq = h * h;
+            const discr = h_sq - a * c;
+
+            if (discr > 0) {
+                return .{ 2, discr };
+            }
+            else if (discr == 0) {
+                return .{ 1, discr };
+            }
+            else {
+                return .{ 0, discr };
+            }
+        },
+        .float, .comptime_float => {
+            std.debug.assert(!std.math.isNan(a));
+            std.debug.assert(!std.math.isNan(h));
+            std.debug.assert(!std.math.isNan(c));
+
+            const h_sq = h * h;
+            const discr = @mulAdd(T, -a, c, h_sq);
+
+            const max_magnitude = @max(@abs(h_sq), @abs(a*c));
+            const tolerance: T = 2.0;
+            const eps = std.math.floatEpsAt(T, max_magnitude) * tolerance;
+
+            if (discr > eps) {
+                return .{ 2, discr };
+            }
+            else if (discr >= -eps) {
+                return .{ 1, discr };
+            }
+            else {
+                return .{ 0, discr };
+            }
         },
         else => @compileError("Type parameter T must be float or int, received '" ++ @typeName(T) ++ "'.")
     }
@@ -95,28 +197,60 @@ test "approxEq" {
 }
 
 test "evaluateDiscriminant" {
-    // a=1, b=5, c=6 => b^2 - 4ac = 25 - 24 = 1 > 0 => Two real roots (true)
-    try std.testing.expect(evaluateDiscriminant(f32, 1.0, 5.0, 6.0));
-    // a=1, b=2, c=3 => b^2 - 4ac = 4 - 12 = -8 < 0 => No real roots (false)
-    try std.testing.expect(!evaluateDiscriminant(f32, 1.0, 2.0, 3.0));
-    // a=1, b=4, c=4 => b^2 - 4ac = 16 - 16 = 0 => Repeated real root (true)
-    try std.testing.expect(evaluateDiscriminant(f32, 1.0, 4.0, 4.0));
+    const res1 = evaluateDiscriminant(f32, 1.0, 5.0, 6.0);
+    try std.testing.expectEqual(2, res1[0]);
+    try std.testing.expectApproxEqAbs(1.0, res1[1], floatEps(f32));
 
-    // Values that result in discriminant being zero mathematically, but might not be exactly zero due to floating point inaccuracies.
-    // b = sqrt(2), a = 0.5, c = 1 => 2 - 4(0.5)(1) = 2 - 2 = 0
-    try std.testing.expect(evaluateDiscriminant(f64, 0.5, @sqrt(2.0), 1.0));
+    const res2 = evaluateDiscriminant(f32, 1.0, 2.0, 3.0);
+    try std.testing.expectEqual(0, res2[0]);
+    try std.testing.expectApproxEqAbs(-8.0, res2[1], floatEps(f32));
 
-    // Negative discriminant but very small in magnitude
-    // a=1, b=0, c=1e-10 => 0 - 4e-10 < 0
-    try std.testing.expect(!evaluateDiscriminant(f64, 1.0, 0.0, 1e-10));
+    const res3 = evaluateDiscriminant(f32, 1.0, 4.0, 4.0);
+    try std.testing.expectEqual(1, res3[0]);
+    try std.testing.expectApproxEqAbs(0.0, res3[1], floatEps(f32));
 
-    // Negative discriminant extremely close to zero
-    try std.testing.expect(!evaluateDiscriminant(f64, 1.0, 2.0, 1.0 + 1e-14));
+    const res4 = evaluateDiscriminant(f64, 0.5, @sqrt(2.0), 1.0);
+    try std.testing.expectEqual(1, res4[0]);
+    try std.testing.expectApproxEqAbs(0.0, res4[1], 1e-10);
 
-    // a=1, b=5, c=6 => b^2 - 4ac = 25 - 24 = 1 > 0
-    try std.testing.expect(evaluateDiscriminant(i32, 1, 5, 6));
-    // a=1, b=2, c=3 => b^2 - 4ac = 4 - 12 = -8 < 0
-    try std.testing.expect(!evaluateDiscriminant(i32, 1, 2, 3));
-    // a=1, b=4, c=4 => b^2 - 4ac = 16 - 16 = 0
-    try std.testing.expect(evaluateDiscriminant(i32, 1, 4, 4));
+    const res5 = evaluateDiscriminant(f64, 1.0, 0.0, 1e-10);
+    try std.testing.expectEqual(0, res5[0]);
+    try std.testing.expectApproxEqAbs(-4e-10, res5[1], 1e-15);
+
+    const res6 = evaluateDiscriminant(f64, 1.0, 2.0, 1.0 + 1e-14);
+    try std.testing.expectEqual(0, res6[0]);
+    try std.testing.expectApproxEqAbs(-4e-14, res6[1], 1e-15);
+
+    const res7 = evaluateDiscriminant(i32, 1, 5, 6);
+    try std.testing.expectEqual(2, res7[0]);
+    try std.testing.expectEqual(@as(i32, 1), res7[1]);
+
+    const res8 = evaluateDiscriminant(i32, 1, 2, 3);
+    try std.testing.expectEqual(0, res8[0]);
+    try std.testing.expectEqual(@as(i32, -8), res8[1]);
+
+    const res9 = evaluateDiscriminant(i32, 1, 4, 4);
+    try std.testing.expectEqual(1, res9[0]);
+    try std.testing.expectEqual(@as(i32, 0), res9[1]);
+}
+
+test "evaluateDiscriminantReduced" {
+    // a=1, b=5 (h=2.5), c=6 => h^2 - ac = 6.25 - 6 = 0.25 > 0 => Two real roots
+    const res1 = evaluateDiscriminantReduced(f32, 1.0, 2.5, 6.0);
+    try std.testing.expectEqual(2, res1[0]);
+    try std.testing.expectApproxEqAbs(0.25, res1[1], floatEps(f32));
+
+    // a=1, b=2 (h=1), c=3 => h^2 - ac = 1 - 3 = -2 < 0 => No real roots
+    const res2 = evaluateDiscriminantReduced(f32, 1.0, 1.0, 3.0);
+    try std.testing.expectEqual(0, res2[0]);
+    try std.testing.expectApproxEqAbs(-2.0, res2[1], floatEps(f32));
+
+    // a=1, b=4 (h=2), c=4 => h^2 - ac = 4 - 4 = 0 => Repeated real root
+    const res3 = evaluateDiscriminantReduced(f32, 1.0, 2.0, 4.0);
+    try std.testing.expectEqual(1, res3[0]);
+    try std.testing.expectApproxEqAbs(0.0, res3[1], floatEps(f32));
+
+    const res4 = evaluateDiscriminantReduced(i32, 1, 2, -3);
+    try std.testing.expectEqual(2, res4[0]);
+    try std.testing.expectEqual(@as(i32, 7), res4[1]);
 }

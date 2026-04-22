@@ -4,10 +4,13 @@ const std = @import("std");
 const rendering = @import("rendering.zig");
 const config = @import("../../config.zig");
 const math_utils = @import("../../math_utils.zig");
+const geometry = @import("geometry.zig");
 
 const Vec3 = @import("../../Vec3.zig");
 const Ray = @import("Ray.zig");
 const Camera = @import("Camera.zig");
+const Sphere = geometry.Sphere;
+const Hittable = geometry.Hittable;
 const RenderSettings = rendering.RenderSettings;
 const Float = config.Float;
 
@@ -15,14 +18,9 @@ const approxEq = math_utils.approxEq;
 const evaluateDiscriminant = math_utils.evaluateDiscriminant;
 const dot = Vec3.dot;
 
-pub const Sphere = struct {
-    center: Vec3,
-    radius: Float
-};
-
 camera: Camera,
-// shapes: []const Sphere, //TODO: Possibly make this dynamically allocated so that it can be interacted with at runtime
-sphere: Sphere,
+// hittables: []const Hittable, //TODO: Possibly make this dynamically allocated so that it can be interacted with at runtime
+hittable: Hittable,
 
 pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void {
     comptime {
@@ -58,10 +56,10 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
 
             const ray = Ray {
                 .origin = camera._pos,
-                .dir = pixel.sub(camera._pos).normalized(),
+                .dir = pixel.sub(camera._pos),
             };
 
-            if (raySphereIntersection(ray, scene.sphere)) {
+            if (scene.hittable.hit(ray, 0.0, std.math.inf(Float)) != null) {
                 try writer.writeInt(u24, 0xFF_FF_FF, .big); // White pixel in PPM P6
             }
             else {
@@ -71,20 +69,4 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
     }
 
    try writer.flush();
-}
-
-/// Parameter `ray_dir` must be normalized.
-pub fn raySphereIntersection(ray: Ray, sphere: Sphere) bool {
-    std.debug.assert(ray.dir.isNormalized());
-
-    // Intersection between a ray and a sphere (implicit eq: (x - x_c)^2 + (y - y_c)^2 + (z - z_c)^2 = r^2, parametric eq: (P - C)^2 - r^2 = 0)\
-    const r = sphere.radius;
-    const eye_to_sphere = ray.origin.sub(sphere.center);
-
-    // To find the t parameter we must solve a second-grade linear equation with the following parameters:
-    const a: Float = 1.0; // If the ray dir is normalized, otherwise it's equal to: dot(dir, dir);
-    const b = dot(ray.dir.scalarMul(2.0), ray.origin.sub(sphere.center));
-    const c = dot(eye_to_sphere, eye_to_sphere) - r * r;
-
-    return evaluateDiscriminant(Float, a, b, c);
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const graphics = @import("graphics.zig");
 const fs_utils = @import("fs_utils.zig");
+const geometry = graphics.scene_3d.geometry;
 
 const Color = graphics.Color;
 const Scene = graphics.scene_3d.Scene;
@@ -83,9 +84,11 @@ pub fn main(init: std.process.Init) !void {
             90.0,
             render_settings
         ),
-        .sphere = Scene.Sphere {
-            .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-            .radius = 5.0
+        .hittable = geometry.Hittable {
+            .sphere = geometry.Sphere {
+                .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+                .radius = 5.0
+            }
         },
     };
 

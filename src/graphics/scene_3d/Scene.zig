@@ -48,7 +48,7 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
             };
 
             const hit = scene.hittable.hit(ray, 0.0, std.math.inf(Float));
-            const pixel_color = try ray_color(ray, hit);
+            const pixel_color = ray_color(ray, hit);
             try writer.writeInt(u24, pixel_color.toPacked(), .big); // White pixel in PPM P6
         }
     }
@@ -56,13 +56,9 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
    try writer.flush();
 }
 
-fn ray_color(ray: Ray, hit: ?HitRecord) !Color {
+fn ray_color(ray: Ray, hit: ?HitRecord) Color {
     if (hit) |record| {
-        return Color {
-            .r = @intFromFloat(0.5 * (record.normal.x + 1.0) * 255.999),
-            .g = @intFromFloat(0.5 * (record.normal.y + 1.0) * 255.999),
-            .b = @intFromFloat(0.5 * (record.normal.z + 1.0) * 255.999)
-        };
+        return Color.fromFloats(Float, record.normal.x, record.normal.y, record.normal.z, -1.0, 1.0);
     }
 
     const grad = Gradient(Float) {
@@ -71,8 +67,7 @@ fn ray_color(ray: Ray, hit: ?HitRecord) !Color {
     };
 
     const norm_dir = ray.dir.normalized();
-    const t = 0.5 * (norm_dir.y + 1.0);
-    return try grad.at(t);
+    return grad.at(0.5 * (norm_dir.y + 1.0));
 }
 
 fn assertHasWriteInt(WriterType: type) void {

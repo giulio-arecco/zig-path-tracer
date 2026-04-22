@@ -42,14 +42,14 @@ pub const Sphere = struct {
         }
 
         const point = ray.at(root);
-        const normal = (point.sub(self.center)).scalarDiv(self.radius); // Outward-facing normal
-
-        std.debug.assert(normal.isNormalized());
+        const outward_normal = (point.sub(self.center)).scalarDiv(self.radius);
+        const front_face, const normal = HitRecord.determineNormalOrientation(ray, outward_normal);
 
         return HitRecord {
           .t = root,
           .point = point,
-          .normal = normal
+          .normal = normal,
+          .front_face = front_face
         };
     }
 };
@@ -57,7 +57,19 @@ pub const Sphere = struct {
 pub const HitRecord = struct {
     t: Float,
     point: Vec3,
-    normal: Vec3
+    normal: Vec3,
+    front_face: bool,
+
+    /// Determines a normal vector orientation.\
+    /// **NOTE**: The parameter `outward_normal` is assumed to be normalized.
+    pub fn determineNormalOrientation(ray: Ray, outward_normal: Vec3) struct { bool, Vec3 } {
+        std.debug.assert(outward_normal.isNormalized());
+
+        const front_face = dot(ray.dir, outward_normal) < 0;
+        const normal = if (front_face) outward_normal else outward_normal.scalarMul(-1.0);
+
+        return .{ front_face, normal };
+    }
 };
 
 pub const Hittable = union(enum) {

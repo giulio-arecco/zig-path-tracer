@@ -23,23 +23,7 @@ camera: Camera,
 hittable: Hittable,
 
 pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void {
-    comptime {
-        const WriterType = @TypeOf(writer);
-
-        const ActualType = switch (@typeInfo(WriterType)) {
-            .pointer => |ptr_info| ptr_info.child,
-            else => WriterType
-        };
-
-        switch (@typeInfo(ActualType)) {
-            .@"struct" => {
-                if (!@hasDecl(ActualType, "writeInt")) {
-                    @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'write' method.");
-                }
-            },
-            else => @compileError("Expected a struct or a pointer to struct, received '" ++ @typeName(ActualType) ++ "' instead.")
-        }
-    }
+    comptime assertHasWriteInt(@TypeOf(writer));
 
     const camera = scene.camera;
     const image_width = settings.image_width;
@@ -69,4 +53,20 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
     }
 
    try writer.flush();
+}
+
+fn assertHasWriteInt(WriterType: type) void {
+    const ActualType = switch (@typeInfo(WriterType)) {
+        .pointer => |ptr_info| ptr_info.child,
+        else => WriterType
+    };
+
+    switch (@typeInfo(ActualType)) {
+        .@"struct" => {
+            if (!@hasDecl(ActualType, "writeInt")) {
+                @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'write' method.");
+            }
+        },
+        else => @compileError("Expected a struct or a pointer to struct, received '" ++ @typeName(ActualType) ++ "' instead.")
+    }
 }

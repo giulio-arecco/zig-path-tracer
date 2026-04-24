@@ -161,6 +161,32 @@ pub fn evaluateDiscriminantReduced(comptime T: type, a: T, h: T, c: T) struct {u
     }
 }
 
+pub fn Interval(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        .comptime_float, .comptime_int, .int, .float => {},
+        else => @compileError("T must be a numeric type (comptime_float, float, comptime_int, int), found '" ++ @typeName(T) ++ "'.")
+    }
+
+    return struct {
+        const Self = @This();
+
+        min: T,
+        max: T,
+
+        pub fn size(self: Self) T {
+            return self.max - self.min;
+        }
+
+        pub fn contains(self: Self, x: T) bool {
+            return x >= self.min and x <= self.max;
+        }
+
+        pub fn surrounds(self: Self, x: T) bool {
+            return x > self.min and x < self.max;
+        }
+    };
+}
+
 test "approxEq" {
     try std.testing.expect(approxEq(u8, 0, 0));
     try std.testing.expect(approxEq(u8, 1, 1));
@@ -254,3 +280,50 @@ test "evaluateDiscriminantReduced" {
     try std.testing.expectEqual(2, res4[0]);
     try std.testing.expectEqual(@as(i32, 7), res4[1]);
 }
+
+test "Interval.size" {
+    const IntervalF32 = Interval(f32);
+    const intvlF = IntervalF32{ .min = 1.0, .max = 5.0 };
+    try std.testing.expectApproxEqAbs(4.0, intvlF.size(), floatEps(f32));
+
+    const IntervalI32 = Interval(i32);
+    const intvlI = IntervalI32{ .min = -2, .max = 3 };
+    try std.testing.expectEqual(@as(i32, 5), intvlI.size());
+}
+
+test "Interval.contains" {
+    const IntervalF32 = Interval(f32);
+    const intvlF = IntervalF32{ .min = 1.0, .max = 5.0 };
+    try std.testing.expect(intvlF.contains(1.0));
+    try std.testing.expect(intvlF.contains(3.0));
+    try std.testing.expect(intvlF.contains(5.0));
+    try std.testing.expect(!intvlF.contains(0.9));
+    try std.testing.expect(!intvlF.contains(5.1));
+
+    const IntervalI32 = Interval(i32);
+    const intvlI = IntervalI32{ .min = -2, .max = 3 };
+    try std.testing.expect(intvlI.contains(-2));
+    try std.testing.expect(intvlI.contains(0));
+    try std.testing.expect(intvlI.contains(3));
+    try std.testing.expect(!intvlI.contains(-3));
+    try std.testing.expect(!intvlI.contains(4));
+}
+
+test "Interval.surrounds" {
+    const IntervalF32 = Interval(f32);
+    const intvlF = IntervalF32{ .min = 1.0, .max = 5.0 };
+    try std.testing.expect(!intvlF.surrounds(1.0));
+    try std.testing.expect(intvlF.surrounds(3.0));
+    try std.testing.expect(!intvlF.surrounds(5.0));
+    try std.testing.expect(!intvlF.surrounds(0.9));
+    try std.testing.expect(!intvlF.surrounds(5.1));
+
+    const IntervalI32 = Interval(i32);
+    const intvlI = IntervalI32{ .min = -2, .max = 3 };
+    try std.testing.expect(!intvlI.surrounds(-2));
+    try std.testing.expect(intvlI.surrounds(0));
+    try std.testing.expect(!intvlI.surrounds(3));
+    try std.testing.expect(!intvlI.surrounds(-3));
+    try std.testing.expect(!intvlI.surrounds(4));
+}
+

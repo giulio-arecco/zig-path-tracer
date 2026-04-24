@@ -7,7 +7,6 @@ const Ray = @import("Ray.zig");
 const Float = config.Float;
 
 const dot = Vec3.dot;
-const evaluateDiscriminant = math_utils.evaluateDiscriminant;
 const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
 
 
@@ -61,6 +60,8 @@ pub const HitRecord = struct {
     front_face: bool,
 
     /// Determines a normal vector orientation. The resulting normal will always point against the ray.\
+    /// The first tuple field indicates whether the ray hit the outside of the surface (front face, `true`) or the inside of the surface (back face, `false`).\
+    /// The second tuple field contains the oriented normal.\
     /// **NOTE**: The parameter `outward_normal` is assumed to be normalized.
     pub fn determineNormalOrientation(ray: Ray, outward_normal: Vec3) struct { bool, Vec3 } {
         std.debug.assert(outward_normal.isNormalized());

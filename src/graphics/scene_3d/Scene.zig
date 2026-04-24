@@ -19,7 +19,6 @@ const RenderSettings = rendering.RenderSettings;
 const Float = config.Float;
 
 const approxEq = math_utils.approxEq;
-const evaluateDiscriminant = math_utils.evaluateDiscriminant;
 const dot = Vec3.dot;
 
 camera: Camera,

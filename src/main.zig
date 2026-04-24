@@ -41,31 +41,6 @@ pub fn main(init: std.process.Init) !void {
     const file = try createImgFile(init.io, cwd, FILE_PATH);
     defer file.close(init.io);
 
-    // print("File created succesfully.\n", .{});
-
-    // const bg_color = Color {
-    //     .r = 0,
-    //     .g = 0,
-    //     .b = 0
-    // };
-
-    // const fill = FillMethod {
-    //     .gradient = Gradient(f32) {
-    //         .start_color = .{.r = 110, .g = 225, .b = 225},
-    //         .end_color   = .{.r = 240, .g = 200, .b = 20},
-    //         .min_t = @floatFromInt(CIRCLE_CENTER_X - CIRCLE_RADIUS),
-    //         .max_t = @floatFromInt(CIRCLE_CENTER_X + CIRCLE_RADIUS)
-    //     }
-    // };
-
-    // try drawCircle(init.io, file, IMG_HEIGHT, IMG_WIDTH, CIRCLE_CENTER_X, CIRCLE_CENTER_Y, CIRCLE_RADIUS, fill, bg_color);
-    // print("Circle succesfully drawn on file.\n", .{});
-
-    // const header_size = comptime fs_utils.computePpmP6HeaderSize(255, IMG_WIDTH, IMG_HEIGHT);
-    // var buf: [header_size + IMG_WIDTH * IMG_HEIGHT * 3]u8 = undefined;
-    // var stdout_writer = std.Io.File.stdout().writer(init.io, &buf);
-    // const writer = &stdout_writer.interface;
-
     var buf: [1024]u8 = undefined;
     var file_writer = file.writer(init.io, &buf);
     const writer = &file_writer.interface;
@@ -84,8 +59,8 @@ pub fn main(init: std.process.Init) !void {
             90.0,
             render_settings
         ),
-        .hittable = geometry.Hittable {
-            .sphere = geometry.Sphere {
+        .hittable = .{
+            .sphere = .{
                 .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
                 .radius = 5.0
             }

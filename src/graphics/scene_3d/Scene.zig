@@ -5,13 +5,12 @@ const rendering = @import("rendering.zig");
 const config = @import("../../config.zig");
 const math_utils = @import("../../math_utils.zig");
 const geometry = @import("geometry.zig");
-const color = @import("../color.zig");
 
 const Vec3 = @import("../../Vec3.zig");
 const Ray = @import("Ray.zig");
 const Camera = @import("Camera.zig");
-const Color = color.Color;
-const Gradient = color.Gradient;
+const Color = @import("../Color.zig");
+const Gradient = Color.Gradient;
 const HitRecord = geometry.HitRecord;
 const Sphere = geometry.Sphere;
 const Hittable = geometry.Hittable;

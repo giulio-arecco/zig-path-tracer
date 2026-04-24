@@ -1,3 +1,5 @@
+const Color = @This();
+
 const std = @import("std");
 const config = @import("../config.zig");
 const math_utils = @import("../math_utils.zig");
@@ -6,60 +8,58 @@ const Float = config.Float;
 const Vec3 = @import("../Vec3.zig");
 const approxEq = math_utils.approxEq;
 
-pub const Color = struct {
-    r: u8,
-    g: u8,
-    b: u8,
+r: u8,
+g: u8,
+b: u8,
 
-    pub inline fn toPacked(self: Color) u24 {
-        return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
-    }
+pub inline fn toPacked(self: Color) u24 {
+    return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
+}
 
-    /// Converts RGB components from a floating-point interval `[min, max]` into an 8-bit `Color`.\
-    /// `min` and `max` must be different, and each channel ranges from `min` to `max`, but may exceed those bounds.
-    pub fn fromFloats(comptime T: type, r: T, g: T, b: T, min: T, max: T) Color {
-        comptime {
-            if (@typeInfo(T) != .float) {
-                @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
-            }
+/// Converts RGB components from a floating-point interval `[min, max]` into an 8-bit `Color`.\
+/// `min` and `max` must be different, and each channel ranges from `min` to `max`, but may exceed those bounds.
+pub fn fromFloats(comptime T: type, r: T, g: T, b: T, min: T, max: T) Color {
+    comptime {
+        if (@typeInfo(T) != .float) {
+            @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
         }
-
-        std.debug.assert(!approxEq(Float, max, min));
-
-        const scaled_r = if (r < min) min else if (r > max) max else r;
-        const scaled_g = if (g < min) min else if (g > max) max else g;
-        const scaled_b = if (b < min) min else if (b > max) max else b;
-
-        return .{
-            .r = @intFromFloat(@round((scaled_r - min) * 255.0 / (max - min))),
-            .g = @intFromFloat(@round((scaled_g - min) * 255.0 / (max - min))),
-            .b = @intFromFloat(@round((scaled_b - min) * 255.0 / (max - min))),
-        };
     }
 
-    pub fn toFloats(self: Color, comptime T: type) struct {T, T, T} {
-        comptime {
-            if (@typeInfo(T) != .float) {
-                @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
-            }
+    std.debug.assert(!approxEq(Float, max, min));
+
+    const scaled_r = if (r < min) min else if (r > max) max else r;
+    const scaled_g = if (g < min) min else if (g > max) max else g;
+    const scaled_b = if (b < min) min else if (b > max) max else b;
+
+    return .{
+        .r = @intFromFloat(@round((scaled_r - min) * 255.0 / (max - min))),
+        .g = @intFromFloat(@round((scaled_g - min) * 255.0 / (max - min))),
+        .b = @intFromFloat(@round((scaled_b - min) * 255.0 / (max - min))),
+    };
+}
+
+pub fn toFloats(self: Color, comptime T: type) struct {T, T, T} {
+    comptime {
+        if (@typeInfo(T) != .float) {
+            @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
         }
-
-        return .{
-            @as(T, @floatFromInt(self.r)) / 255.0,
-            @as(T, @floatFromInt(self.g)) / 255.0,
-            @as(T, @floatFromInt(self.b)) / 255.0,
-        };
     }
 
-    /// Returns a Vec3 with all coordinates ranging from 0.0 to 1.0
-    pub fn toVec3(self: Color) Vec3 {
-        return .{
-            .x = @as(Float, @floatFromInt(self.r)) / 255.0,
-            .y = @as(Float, @floatFromInt(self.g)) / 255.0,
-            .z = @as(Float, @floatFromInt(self.b)) / 255.0,
-        };
-    }
-};
+    return .{
+        @as(T, @floatFromInt(self.r)) / 255.0,
+        @as(T, @floatFromInt(self.g)) / 255.0,
+        @as(T, @floatFromInt(self.b)) / 255.0,
+    };
+}
+
+/// Returns a Vec3 with all coordinates ranging from 0.0 to 1.0
+pub fn toVec3(self: Color) Vec3 {
+    return .{
+        .x = @as(Float, @floatFromInt(self.r)) / 255.0,
+        .y = @as(Float, @floatFromInt(self.g)) / 255.0,
+        .z = @as(Float, @floatFromInt(self.b)) / 255.0,
+    };
+}
 
 pub fn Gradient(comptime T: type) type {
     comptime {

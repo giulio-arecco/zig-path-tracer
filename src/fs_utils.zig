@@ -1,9 +1,10 @@
 const std = @import("std");
-const color = @import("graphics/color.zig");
+
+const Color = @import("graphics/Color.zig");
+const Gradient = Color.Gradient;
 
 const print = std.debug.print;
-const Color = color.Color;
-const Gradient = color.Gradient;
+
 
 pub const FillMethod = union(enum) {
     color: Color,

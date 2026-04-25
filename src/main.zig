@@ -1,14 +1,12 @@
 const std = @import("std");
 const graphics = @import("graphics.zig");
 const fs_utils = @import("fs_utils.zig");
-const geometry = graphics.scene_3d.geometry;
+const rendering = graphics.scene_3d.rendering;
 
-const Color = graphics.Color;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
-const RenderSettings = graphics.scene_3d.rendering.RenderSettings;
-const FillMethod = fs_utils.FillMethod;
-const Gradient = graphics.Gradient;
+const RenderSettings = rendering.RenderSettings;
+const RayTracer = rendering.RayTracer;
 
 const print = std.debug.print;
 const drawCircle = fs_utils.drawCircle;
@@ -16,9 +14,6 @@ const createImgFile = fs_utils.createImgFile;
 
 const IMG_HEIGHT= 512;
 const IMG_WIDTH = 512;
-// const CIRCLE_CENTER_X = 128;
-// const CIRCLE_CENTER_Y = 128;
-// const CIRCLE_RADIUS = 64;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
@@ -55,8 +50,8 @@ pub fn main(init: std.process.Init) !void {
     defer memory_map.destroy(init.io);
 
     const render_settings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT
+            .image_width = IMG_WIDTH,
+            .image_height = IMG_HEIGHT
     };
 
     const scene = Scene {
@@ -76,11 +71,15 @@ pub fn main(init: std.process.Init) !void {
         },
     };
 
+    const raytracer = RayTracer {
+        .settings = render_settings
+    };
+
     var buf_writer = std.Io.Writer.fixed(memory_map.memory[0..PPM_HEADER_LEN]);
     const writer = &buf_writer;
-
     try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-    try Scene.drawSphere(scene, render_settings, memory_map.memory[PPM_HEADER_LEN..]);
+
+    raytracer.renderSingleHittable(scene, memory_map.memory[PPM_HEADER_LEN..]);
 
     try memory_map.write(init.io);
 }

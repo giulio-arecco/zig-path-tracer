@@ -1,9 +1,11 @@
 const std = @import("std");
+const type_utils = @import("type_utils.zig");
 
 const Color = @import("graphics/Color.zig");
 const Gradient = Color.Gradient;
 
 const print = std.debug.print;
+const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
 
 
 pub const FillMethod = union(enum) {
@@ -16,20 +18,7 @@ pub fn computePpmP6HeaderSize(comptime max_size: u16, comptime img_width: usize,
 }
 
 pub fn writePpmP6Header(writer: anytype, max_size: u16, img_width: usize, img_height: usize) !void {
-    const WriterType = @TypeOf(writer);
-    const ActualType = switch (@typeInfo(WriterType)) {
-        .pointer => |ptr_info| ptr_info.child,
-        else => WriterType
-    };
-
-    switch (@typeInfo(ActualType)) {
-        .@"struct" => {
-            if (!@hasDecl(ActualType, "print") or !@hasDecl(ActualType, "flush")) {
-                @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'print' and/or 'flush' methods.");
-            }
-        },
-        else => @compileError("Expected a struct or a pointer to struct, received '" ++ @typeName(ActualType) ++ "' instead.")
-    }
+    assertAnytypeHasDecls(writer, &.{ "print", "flush" });
 
     try writer.print("P6\n{d} {d}\n{d}\n", .{img_width, img_height, max_size});
     try writer.flush();

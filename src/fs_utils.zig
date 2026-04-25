@@ -13,6 +13,18 @@ pub const FillMethod = union(enum) {
     gradient: Gradient(f32)
 };
 
+fn computePathStrLen(comptime path_components: []const []const u8) usize {
+    comptime var len: usize = 0;
+
+    // Compute the total number of bytes that make up the path
+    inline for (path_components) |component| {
+        len += component.len;
+    }
+
+    len += path_components.len - 1; // Add the separator bytes
+    return len;
+}
+
 pub fn computePpmP6HeaderSize(comptime max_size: u16, comptime img_width: usize, comptime img_height: usize) usize {
     return std.fmt.count("P6\n{d} {d}\n{d}\n", .{ img_width, img_height, max_size });
 }
@@ -356,4 +368,11 @@ test "Write PPM P6 header" {
     const ex_3 = "P6\n123456 987654\n65535\n";
     data = try reader.take(ex_3.len);
     try std.testing.expectEqualStrings(ex_3, data);
+}
+
+test "computePathStrLen" {
+    try std.testing.expectEqual(3, computePathStrLen(&.{"foo"}));
+    try std.testing.expectEqual(7, computePathStrLen(&.{"foo", "bar"}));
+    try std.testing.expectEqual(5, computePathStrLen(&.{"a", "b", "c"}));
+    try std.testing.expectEqual(12, computePathStrLen(&.{"usr", "bin", "bash"}));
 }

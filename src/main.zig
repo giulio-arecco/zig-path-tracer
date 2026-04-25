@@ -11,6 +11,7 @@ const RayTracer = rendering.RayTracer;
 const print = std.debug.print;
 const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
+const computePathStrLen = fs_utils.computePathStrLen;
 
 const IMG_HEIGHT= 512;
 const IMG_WIDTH = 512;
@@ -19,18 +20,6 @@ const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
 const FILE_PATH = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(IMG_OUT_PATHS)});
 const PPM_HEADER_LEN = fs_utils.computePpmP6HeaderSize(255, IMG_WIDTH, IMG_HEIGHT);
-
-fn computePathStrLen(comptime path_components: []const []const u8) usize {
-    comptime var len: usize = 0;
-
-    // Compute the total number of bytes that make up the path
-    for (path_components) |component| {
-        len += component.len;
-    }
-
-    len += path_components.len - 1; // Add the separator bytes
-    return len;
-}
 
 pub fn main(init: std.process.Init) !void {
     const cwd = std.Io.Dir.cwd();

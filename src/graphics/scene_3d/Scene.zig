@@ -24,9 +24,7 @@ camera: Camera,
 // hittables: []const Hittable, //TODO: Possibly make this dynamically allocated so that it can be interacted with at runtime
 hittable: Hittable,
 
-pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void {
-    comptime assertHasWriteInt(@TypeOf(writer));
-
+pub fn drawSphere(scene: Scene, settings: RenderSettings, out: []u8) !void {
     const camera = scene.camera;
     const image_width = settings.image_width;
     const image_height = settings.image_height;
@@ -47,11 +45,11 @@ pub fn drawSphere(scene: Scene, settings: RenderSettings, writer: anytype) !void
 
             const hit = scene.hittable.hit(ray, 0.0, std.math.inf(Float));
             const pixel_color = ray_color(ray, hit);
-            try writer.writeInt(u24, pixel_color.toPacked(), .big); // White pixel in PPM P6
+
+            const pixel_byte_index = (y_screen * image_width + x_screen) * 3;
+            std.mem.writeInt(u24, out[pixel_byte_index..][0..3], pixel_color.toPacked(), .big);
         }
     }
-
-   try writer.flush();
 }
 
 fn ray_color(ray: Ray, hit: ?HitRecord) Color {
@@ -77,7 +75,7 @@ fn assertHasWriteInt(WriterType: type) void {
     switch (@typeInfo(ActualType)) {
         .@"struct" => {
             if (!@hasDecl(ActualType, "writeInt")) {
-                @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'write' method.");
+                @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'writeInt' method.");
             }
         },
         else => @compileError("Expected a struct or a pointer to struct, received '" ++ @typeName(ActualType) ++ "' instead.")

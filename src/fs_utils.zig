@@ -15,7 +15,22 @@ pub fn computePpmP6HeaderSize(comptime max_size: u16, comptime img_width: usize,
     return std.fmt.count("P6\n{d} {d}\n{d}\n", .{ img_width, img_height, max_size });
 }
 
-pub fn writePpmP6Header(writer: *std.Io.Writer, max_size: u16, img_width: usize, img_height: usize) !void {
+pub fn writePpmP6Header(writer: anytype, max_size: u16, img_width: usize, img_height: usize) !void {
+    const WriterType = @TypeOf(writer);
+    const ActualType = switch (@typeInfo(WriterType)) {
+        .pointer => |ptr_info| ptr_info.child,
+        else => WriterType
+    };
+
+    switch (@typeInfo(ActualType)) {
+        .@"struct" => {
+            if (!@hasDecl(ActualType, "print") or !@hasDecl(ActualType, "flush")) {
+                @compileError("The stuct '" ++ @typeName(ActualType) ++ "' does not implement the 'print' and/or 'flush' methods.");
+            }
+        },
+        else => @compileError("Expected a struct or a pointer to struct, received '" ++ @typeName(ActualType) ++ "' instead.")
+    }
+
     try writer.print("P6\n{d} {d}\n{d}\n", .{img_width, img_height, max_size});
     try writer.flush();
 }
@@ -78,7 +93,7 @@ pub fn drawCircle(io: std.Io, file: std.Io.File, img_height: u16, img_width: u16
 pub fn createImgFile(io: std.Io, dir: std.Io.Dir, comptime sub_path: []const u8) !std.Io.File {
     if (sub_path.len == 0) @compileError("sub_path cannot be empty");
 
-    return dir.createFile(io, sub_path, .{ .exclusive = true }) catch |err| switch (err) {
+    return dir.createFile(io, sub_path, .{ .exclusive = true, .read = true }) catch |err| switch (err) {
         error.FileNotFound => return try createDirAndFile(io, dir, sub_path),
         error.PathAlreadyExists => return try createFileWithSuffix(io, dir, sub_path),
         else => |e| return e
@@ -90,7 +105,7 @@ fn createDirAndFile(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) !std.Io.F
 
     if (std.fs.path.dirname(sub_path)) |dirname| {
         try dir.createDirPath(io, dirname);
-        return try dir.createFile(io, sub_path, .{ .exclusive = true });
+        return try dir.createFile(io, sub_path, .{ .exclusive = true, .read = true });
     }
 
     return error.BadPathName;
@@ -130,7 +145,7 @@ fn createFileWithSuffix(io: std.Io, dir: std.Io.Dir, comptime sub_path: []const 
     var buf: [filename.len + max_idx_str.len + filext.len]u8 = undefined;
     const filename_with_suffix = try std.fmt.bufPrint(&buf, "{s}{d}{s}", .{ filename, top_idx, filext });
 
-    return try file_dir.createFile(io, filename_with_suffix, .{ .exclusive = true });
+    return try file_dir.createFile(io, filename_with_suffix, .{ .exclusive = true, .read = true });
 }
 
 test "Compute PPM P6 header size" {

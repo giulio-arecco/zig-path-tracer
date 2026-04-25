@@ -23,6 +23,7 @@ const IMG_WIDTH = 512;
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
 const FILE_PATH = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(IMG_OUT_PATHS)});
+const PPM_HEADER_LEN = fs_utils.computePpmP6HeaderSize(255, IMG_WIDTH, IMG_HEIGHT);
 
 fn computePathStrLen(comptime path_components: []const []const u8) usize {
     comptime var len: usize = 0;
@@ -41,9 +42,17 @@ pub fn main(init: std.process.Init) !void {
     const file = try createImgFile(init.io, cwd, FILE_PATH);
     defer file.close(init.io);
 
-    var buf: [1024]u8 = undefined;
-    var file_writer = file.writer(init.io, &buf);
-    const writer = &file_writer.interface;
+    // var buf: [1024]u8 = undefined;
+    // var file_writer = file.writer(init.io, &buf);
+    // const writer = &file_writer.interface;
+
+    var memory_map = blk: {
+        try file.setLength(init.io, PPM_HEADER_LEN + IMG_HEIGHT * IMG_WIDTH * 3);
+        const stat = try file.stat(init.io);
+
+        break :blk try file.createMemoryMap(init.io, .{.len = stat.size });
+    };
+    defer memory_map.destroy(init.io);
 
     const render_settings = RenderSettings {
         .image_width = IMG_WIDTH,
@@ -67,9 +76,13 @@ pub fn main(init: std.process.Init) !void {
         },
     };
 
+    var buf_writer = std.Io.Writer.fixed(memory_map.memory[0..PPM_HEADER_LEN]);
+    const writer = &buf_writer;
 
     try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-    try Scene.drawSphere(scene, render_settings, writer);
+    try Scene.drawSphere(scene, render_settings, memory_map.memory[PPM_HEADER_LEN..]);
+
+    try memory_map.write(init.io);
 }
 
 test {

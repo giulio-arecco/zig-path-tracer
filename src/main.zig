@@ -1,20 +1,22 @@
 const std = @import("std");
 const graphics = @import("graphics.zig");
 const fs_utils = @import("fs_utils.zig");
+const config = @import("config.zig");
 const rendering = graphics.scene_3d.rendering;
 
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const RenderSettings = rendering.RenderSettings;
 const RayTracer = rendering.RayTracer;
+const Float = config.Float;
 
 const print = std.debug.print;
 const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
 const computePathStrLen = fs_utils.computePathStrLen;
 
-const IMG_HEIGHT= 512;
-const IMG_WIDTH = 512;
+const IMG_HEIGHT= 1080;
+const IMG_WIDTH = 1920;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
@@ -40,7 +42,9 @@ pub fn main(init: std.process.Init) !void {
 
     const render_settings = RenderSettings {
             .image_width = IMG_WIDTH,
-            .image_height = IMG_HEIGHT
+            .image_height = IMG_HEIGHT,
+            .ray_tmin = 0.0,
+            .ray_tmax = std.math.inf(Float)
     };
 
     const scene = Scene {
@@ -52,12 +56,20 @@ pub fn main(init: std.process.Init) !void {
             90.0,
             render_settings
         ),
-        .hittable = .{
-            .sphere = .{
-                .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-                .radius = 5.0
-            }
-        },
+        .hittables = &.{
+            .{
+                .sphere = .{
+                    .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+                    .radius = 5.0
+                }
+            },
+            .{
+                .sphere = .{
+                    .center =  .{ .x = 0.0, .y = -105.0, .z = 0.0 },
+                    .radius = 100.0
+                }
+            },
+        }
     };
 
     const raytracer = RayTracer {

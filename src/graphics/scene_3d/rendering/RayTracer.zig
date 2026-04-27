@@ -18,6 +18,8 @@ pub fn renderSingleHittable(self: RayTracer, scene: Scene, out: []u8) void {
     const camera = scene.camera;
     const image_width = self.settings.image_width;
     const image_height = self.settings.image_height;
+    const ray_tmin = self.settings.ray_tmin;
+    const ray_tmax = self.settings.ray_tmax;
 
     std.debug.print("Viewport Center: {}.\n", .{camera._viewport_center});
     std.debug.print("First pixel position: {}\n", .{camera._pixel_top_left});
@@ -33,8 +35,19 @@ pub fn renderSingleHittable(self: RayTracer, scene: Scene, out: []u8) void {
                 .dir = pixel.sub(camera._pos),
             };
 
-            const hit = scene.hittable.hit(ray, 0.0, std.math.inf(Float));
-            const pixel_color = ray_color(ray, hit);
+            var closest_t = ray_tmax;
+            var closest_hit: ?HitRecord = null;
+            for (scene.hittables) |hittable| {
+                const hit = hittable.hit(ray, ray_tmin, ray_tmax);
+                if (hit) |record| {
+                    if (record.t < closest_t) {
+                        closest_t = record.t;
+                        closest_hit = record;
+                    }
+                }
+            }
+
+            const pixel_color = ray_color(ray, closest_hit);
 
             const pixel_byte_index = (y_screen * image_width + x_screen) * 3;
             std.mem.writeInt(u24, out[pixel_byte_index..][0..3], pixel_color.toPacked(), .big);

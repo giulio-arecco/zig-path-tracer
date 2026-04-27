@@ -1,7 +1,12 @@
 const RenderSettings = @This();
 
+const config = @import("../../../config.zig");
+const Float = config.Float;
+
 image_width: u16,
 image_height: u16,
+ray_tmin: Float,
+ray_tmax: Float,
 
 pub fn getAspectRatio(self: RenderSettings) f32 {
     const f_width: f32 = @floatFromInt(self.image_width);

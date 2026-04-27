@@ -12,9 +12,11 @@ const Float = config.Float;
 const Gradient = Color.Gradient;
 const HitRecord = geometry.HitRecord;
 
+const ray_color = Ray.ray_color;
+
 settings: RenderSettings,
 
-pub fn renderSingleHittable(self: RayTracer, scene: Scene, out: []u8) void {
+pub fn render(self: RayTracer, scene: Scene, out: []u8) void {
     const camera = scene.camera;
     const image_width = self.settings.image_width;
     const image_height = self.settings.image_height;
@@ -53,18 +55,4 @@ pub fn renderSingleHittable(self: RayTracer, scene: Scene, out: []u8) void {
             std.mem.writeInt(u24, out[pixel_byte_index..][0..3], pixel_color.toPacked(), .big);
         }
     }
-}
-
-fn ray_color(ray: Ray, hit: ?HitRecord) Color {
-    if (hit) |record| {
-        return Color.fromFloats(Float, record.normal.x, record.normal.y, record.normal.z, -1.0, 1.0);
-    }
-
-    const grad = Gradient(Float) {
-        .start_color = .{ .r = 255, .g = 255, .b = 255 },
-        .end_color = .{ .r = 128, .g = 180, .b = 255 }
-    };
-
-    const norm_dir = ray.dir.normalized();
-    return grad.at(0.5 * (norm_dir.y + 1.0));
 }

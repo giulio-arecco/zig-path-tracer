@@ -3,12 +3,13 @@ const graphics = @import("graphics.zig");
 const fs_utils = @import("fs_utils.zig");
 const config = @import("config.zig");
 const rendering = graphics.scene_3d.rendering;
+const raytracing = rendering.raytracing;
 
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const RenderSettings = rendering.RenderSettings;
-const RayTracer = rendering.RayTracer;
-const ParallelRayTracer = rendering.ParallelRayTracer;
+const RayTracer = raytracing.RayTracer;
+const ParallelRayTracer = raytracing.ParallelRayTracer;
 const Float = config.Float;
 
 const print = std.debug.print;
@@ -16,8 +17,8 @@ const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
 const computePathStrLen = fs_utils.computePathStrLen;
 
-const IMG_HEIGHT= 4096;
-const IMG_WIDTH = 4096;
+const IMG_HEIGHT= 128;
+const IMG_WIDTH = 128;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
@@ -45,7 +46,9 @@ pub fn main(init: std.process.Init) !void {
             .image_width = IMG_WIDTH,
             .image_height = IMG_HEIGHT,
             .ray_tmin = 0.0,
-            .ray_tmax = std.math.inf(Float)
+            .ray_tmax = std.math.inf(Float),
+            .samples_per_pixel = 50,
+            .pixel_samples_scale = 0.02, // 1/samples_per_pixel
     };
 
     const scene = Scene {

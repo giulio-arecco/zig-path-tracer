@@ -16,6 +16,7 @@ const math_utils = @import("../../math_utils.zig");
 const Vec3 = @import("../../Vec3.zig");
 const Float = @import("../../config.zig").Float;
 const RenderSettings = @import("rendering/RenderSettings.zig");
+const Ray = @import("Ray.zig");
 
 const normalized = Vec3.normalized;
 const sub = Vec3.sub;
@@ -72,6 +73,23 @@ pub fn initLookAt (from: Vec3, to: Vec3, vertical_fov: Float, focal_distance: Fl
     return viewportSetup(from, norm_up, norm_right, norm_forward, focal_distance, vertical_fov, render_settings);
 }
 
+pub fn getRay(self: Camera, random: std.Random, x_screen: usize, y_screen: usize) Ray {
+    const offset = sample_unit_square(random);
+
+    const pixel_sample = self._pixel_top_left.
+                add(self._pixel_delta_u.scalarMul(@as(Float, @floatFromInt(x_screen)) + offset.x)).
+                add(self._pixel_delta_v.scalarMul(@as(Float, @floatFromInt(y_screen)) + offset.y));
+
+    return .{
+        .origin = self._pos,
+        .dir = pixel_sample.sub(self._pos),
+    };
+}
+
+pub fn sample_unit_square(prng: std.Random) Vec3 {
+    return .{ .x = prng.float(Float) - 0.5, .y = prng.float(Float) - 0.5, .z = 0.0 };
+}
+
 fn viewportSetup(pos: Vec3, norm_up: Vec3, norm_right: Vec3, norm_forward: Vec3, focal_distance: Float, vertical_fov: Float, render_settings: RenderSettings) Camera {
     const theta: Float = std.math.degreesToRadians(vertical_fov);
     const viewport_height = 2.0 * focal_distance * @tan(theta / 2.0);
@@ -107,7 +125,7 @@ fn viewportSetup(pos: Vec3, norm_up: Vec3, norm_right: Vec3, norm_forward: Vec3,
 const pi = std.math.pi;
 
 test "init" {
-    const rs = RenderSettings{ .image_width = 800, .image_height = 400 };
+    const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_tmin = 0.0, .ray_tmax = 100.0, .samples_per_pixel = 1, .pixel_samples_scale = 1.0 };
     const pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
     var up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
     var right = Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 };
@@ -141,7 +159,7 @@ test "init" {
 }
 
 test "initLookAt" {
-    const rs = RenderSettings{ .image_width = 800, .image_height = 400 };
+    const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_tmin = 0.0, .ray_tmax = 100.0, .samples_per_pixel = 1, .pixel_samples_scale = 1.0 };
     const pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
     var to = Vec3{ .x = 0.0, .y = 0.0, .z = -50.0 };
     var camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), rs);
@@ -194,7 +212,7 @@ test "initLookAt" {
 }
 
 test "viewportSetup" {
-    const rs = RenderSettings{ .image_width = 800, .image_height = 400 };
+    const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_tmin = 0.0, .ray_tmax = 100.0, .samples_per_pixel = 1, .pixel_samples_scale = 1.0 };
     const pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
     const to = Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 };
     const fov: Float = 90.0;

@@ -1,11 +1,16 @@
 const Ray = @This();
 
 const std = @import("std");
+const math_utils = @import("../../math_utils.zig");
+
 const Vec3 = @import("../../Vec3.zig");
 const Float = @import("../../config.zig").Float;
 const Color = @import("../Color.zig");
 const Gradient = Color.Gradient;
 const HitRecord = @import("geometry.zig").HitRecord;
+const Interval = math_utils.Interval;
+
+const normalizeFloat = math_utils.normalizeFloat;
 
 origin: Vec3,
 dir: Vec3,
@@ -14,7 +19,7 @@ pub fn at(self: Ray, t: Float) Vec3 {
     return self.origin.add(self.dir.scalarMul(t));
 }
 
-pub fn ray_color(ray: Ray, hit: ?HitRecord) Color {
+pub fn rayColor(ray: Ray, hit: ?HitRecord) Color {
     if (hit) |record| {
         return Color.fromFloats(Float, record.normal.x, record.normal.y, record.normal.z, -1.0, 1.0);
     }
@@ -26,6 +31,25 @@ pub fn ray_color(ray: Ray, hit: ?HitRecord) Color {
 
     const norm_dir = ray.dir.normalized();
     return grad.at(0.5 * (norm_dir.y + 1.0));
+}
+
+pub fn rayColorVec3(ray: Ray, hit: ?HitRecord) Vec3 {
+    if (hit) |record| {
+        const normal_range = Interval(Float) { .min = -1.0, .max = 1.0 };
+        return .{
+            .x = normalizeFloat(Float, record.normal.x, normal_range),
+            .y = normalizeFloat(Float, record.normal.y, normal_range),
+            .z = normalizeFloat(Float, record.normal.z, normal_range)
+        };
+    }
+
+    const grad = Gradient(Float) {
+        .start_color = .{ .r = 255, .g = 255, .b = 255 },
+        .end_color = .{ .r = 128, .g = 180, .b = 255 }
+    };
+
+    const norm_dir = ray.dir.normalized();
+    return grad.at(0.5 * (norm_dir.y + 1.0)).toVec3();
 }
 
 test "at" {

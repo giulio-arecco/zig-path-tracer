@@ -69,7 +69,7 @@ pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) struct {u8, T} {
                 return .{ 0, discr };
             }
         },
-        .float, .comptime_float => {
+        .float => {
             std.debug.assert(!std.math.isNan(a));
             std.debug.assert(!std.math.isNan(b));
             std.debug.assert(!std.math.isNan(c));
@@ -85,7 +85,7 @@ pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) struct {u8, T} {
                 return .{ 2, discr };
             }
             else if (discr >= -eps) {
-                return .{ 1, discr };
+                return .{ 1, 0.0 };
             }
             else {
                 return .{ 0, discr };
@@ -135,7 +135,7 @@ pub fn evaluateDiscriminantReduced(comptime T: type, a: T, h: T, c: T) struct {u
                 return .{ 0, discr };
             }
         },
-        .float, .comptime_float => {
+        .float => {
             std.debug.assert(!std.math.isNan(a));
             std.debug.assert(!std.math.isNan(h));
             std.debug.assert(!std.math.isNan(c));
@@ -151,7 +151,7 @@ pub fn evaluateDiscriminantReduced(comptime T: type, a: T, h: T, c: T) struct {u
                 return .{ 2, discr };
             }
             else if (discr >= -eps) {
-                return .{ 1, discr };
+                return .{ 1, 0.0 };
             }
             else {
                 return .{ 0, discr };
@@ -184,7 +184,27 @@ pub fn Interval(comptime T: type) type {
         pub fn surrounds(self: Self, x: T) bool {
             return x > self.min and x < self.max;
         }
+
+        pub fn rescaleValue(self: Self, x: T, x_range: Interval(T)) T {
+            return x_range.min + (x_range.max - x_range.min) * ((x - self.min) / (self.max - self.min));
+        }
     };
+}
+
+pub fn normalizeFloat(comptime T: type, x: T,  x_range: Interval(T)) T {
+    if (@typeInfo(T) != .float) {
+        @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
+    }
+
+    return (x - x_range.min) / (x_range.max - x_range.min);
+}
+
+pub fn rescaleFloat(comptime T: type, x: T, x_range: Interval(T), new_range: Interval(T)) T {
+    if (@typeInfo(T) != .float) {
+        @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
+    }
+
+    return new_range.min + (new_range.max - new_range.min) * ((x - x_range.min) / (x_range.max - x_range.min));
 }
 
 test "approxEq" {
@@ -325,5 +345,47 @@ test "Interval.surrounds" {
     try std.testing.expect(!intvlI.surrounds(3));
     try std.testing.expect(!intvlI.surrounds(-3));
     try std.testing.expect(!intvlI.surrounds(4));
+}
+
+test "Interval.rescaleValue" {
+    const IntervalF32 = Interval(f32);
+    const source_range = IntervalF32{ .min = 0.0, .max = 10.0 };
+    const target_range = IntervalF32{ .min = -1.0, .max = 1.0 };
+
+    try std.testing.expectApproxEqAbs(-1.0, source_range.rescaleValue(0.0, target_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(0.0, source_range.rescaleValue(5.0, target_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, source_range.rescaleValue(10.0, target_range), floatEps(f32));
+
+    try std.testing.expectApproxEqAbs(-2.0, source_range.rescaleValue(-5.0, target_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(2.0, source_range.rescaleValue(15.0, target_range), floatEps(f32));
+}
+
+test "normalizeFloat" {
+    const IntervalF32 = Interval(f32);
+    const range = IntervalF32{ .min = 0.0, .max = 10.0 };
+
+    try std.testing.expectApproxEqAbs(0.0, normalizeFloat(f32, 0.0, range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, 5.0, range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, normalizeFloat(f32, 10.0, range), floatEps(f32));
+
+    try std.testing.expectApproxEqAbs(-0.5, normalizeFloat(f32, -5.0, range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.5, normalizeFloat(f32, 15.0, range), floatEps(f32));
+
+    const range_nonzero = IntervalF32{ .min = 5.0, .max = 15.0 };
+    try std.testing.expectApproxEqAbs(0.0, normalizeFloat(f32, 5.0, range_nonzero), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, normalizeFloat(f32, 15.0, range_nonzero), floatEps(f32));
+}
+
+test "rescaleFloat" {
+    const IntervalF32 = Interval(f32);
+    const old_range = IntervalF32{ .min = 0.0, .max = 10.0 };
+    const new_range = IntervalF32{ .min = -1.0, .max = 1.0 };
+
+    try std.testing.expectApproxEqAbs(-1.0, rescaleFloat(f32, 0.0, old_range, new_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, 5.0, old_range, new_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, rescaleFloat(f32, 10.0, old_range, new_range), floatEps(f32));
+
+    try std.testing.expectApproxEqAbs(-2.0, rescaleFloat(f32, -5.0, old_range, new_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(2.0, rescaleFloat(f32, 15.0, old_range, new_range), floatEps(f32));
 }
 

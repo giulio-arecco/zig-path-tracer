@@ -73,8 +73,8 @@ pub fn initLookAt (from: Vec3, to: Vec3, vertical_fov: Float, focal_distance: Fl
     return viewportSetup(from, norm_up, norm_right, norm_forward, focal_distance, vertical_fov, render_settings);
 }
 
-pub fn getRay(self: Camera, random: std.Random, x_screen: usize, y_screen: usize) Ray {
-    const offset = sample_unit_square(random);
+pub fn getRay(self: Camera, random: std.Random, x_screen: usize, y_screen: usize, sample_center: bool) Ray {
+    const offset: Vec3 = if (sample_center) .{ .x = 0.0, .y = 0.0, .z = 0.0 } else sample_unit_square(random);
 
     const pixel_sample = self._pixel_top_left.
                 add(self._pixel_delta_u.scalarMul(@as(Float, @floatFromInt(x_screen)) + offset.x)).

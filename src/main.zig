@@ -48,8 +48,8 @@ pub fn main(init: std.process.Init) !void {
             .image_height = IMG_HEIGHT,
             .ray_tmin = 0.0,
             .ray_tmax = std.math.inf(Float),
-            .samples_per_pixel = 50,
-            .pixel_samples_scale = 0.02, // 1/samples_per_pixel
+            .samples_per_pixel = 1,
+            .pixel_samples_scale = 1.0, // 1/samples_per_pixel
     };
 
     const scene = Scene {

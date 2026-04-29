@@ -101,8 +101,9 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
 
     var pixel_color_sum = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
 
-    for (0..samples_per_pixel) |_| {
-        const ray = camera.getRay(random, x_screen, y_screen);
+    for (0..samples_per_pixel) |sample| {
+        const ray = if (sample == 0) camera.getRay(random, x_screen, y_screen, true)
+            else camera.getRay(random, x_screen, y_screen, false);
 
         var closest_t = ray_tmax;
         var closest_hit: ?HitRecord = null;

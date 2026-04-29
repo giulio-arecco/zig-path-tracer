@@ -15,6 +15,7 @@ const rayColorVec3 = Ray.rayColorVec3;
 
 pub const RayTracer = struct {
     settings: RenderSettings,
+    progress_root_node: ?std.Progress.Node = null,
 
     pub fn render(self: RayTracer, scene: Scene, out: []u8) void {
         const camera = scene.camera;
@@ -27,11 +28,16 @@ pub const RayTracer = struct {
         var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera._pixel_top_left.squaredMagnitude())));
         const random = prng.random();
 
+        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Serial Ray Tracing", image_height) else null;
+        defer if (task_node) |n| n.end();
+
         for (0..image_height) |y_screen| {
             for (0..image_width) |x_screen| {
                 const pixel_byte_index = (y_screen * image_width + x_screen) * 3;
                 colorPixel(self.settings, scene, random, x_screen, y_screen, out[pixel_byte_index..][0..3]);
             }
+
+            if (task_node) |n| n.completeOne();
         }
     }
 };
@@ -39,6 +45,7 @@ pub const RayTracer = struct {
 pub const ParallelRayTracer = struct {
     io: std.Io,
     settings: RenderSettings,
+    progress_root_node: ?std.Progress.Node = null,
 
     pub fn render(self: ParallelRayTracer, scene: Scene, out: []u8) !void {
         const image_width = self.settings.image_width;
@@ -50,12 +57,15 @@ pub const ParallelRayTracer = struct {
         var group: std.Io.Group = .init;
         defer group.cancel(self.io);
 
+        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Parallel Ray Tracing", image_height) else null;
+        defer if (task_node) |n| n.end();
+
         for (0..image_height) |y_screen| {
             const start = y_screen * image_width * 3;
             const end = start + image_width * 3;
             const row = out[start..end];
 
-            group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row }) catch |err| switch (err) {
+            group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row, task_node }) catch |err| switch (err) {
                 error.ConcurrencyUnavailable => {
                     std.debug.print("Error: concurrency unavailable\n", .{});
                     return;
@@ -66,7 +76,7 @@ pub const ParallelRayTracer = struct {
         try group.await(self.io);
     }
 
-    fn renderRow(self: ParallelRayTracer, scene: Scene, y_screen: usize, row: []u8) void {
+    fn renderRow(self: ParallelRayTracer, scene: Scene, y_screen: usize, row: []u8, progress_node: ?std.Progress.Node) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
 
@@ -77,6 +87,8 @@ pub const ParallelRayTracer = struct {
             const pixel_byte_index = x_screen * 3;
             colorPixel(self.settings, scene, random, x_screen, y_screen, row[pixel_byte_index..][0..3]);
         }
+
+        if (progress_node) |n| n.completeOne();
     }
 };
 

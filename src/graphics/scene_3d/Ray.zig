@@ -42,7 +42,7 @@ pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, de
     const hit = scene.hit(ray, ray_tmin, ray_tmax);
 
     if (hit) |record| {
-        const new_dir = Vec3.randomOnHemisphere(rand, record.normal);
+        const new_dir = record.normal.add(Vec3.randomNormalized(rand)); // Lambertian reflection
         const new_ray = Ray { .origin = record.point, .dir = new_dir };
         return rayColorVec3(new_ray, scene, ray_tmin, ray_tmax, depth - 1, rand).scalarMul(0.5);
     }

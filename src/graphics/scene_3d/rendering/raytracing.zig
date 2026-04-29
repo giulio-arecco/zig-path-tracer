@@ -80,7 +80,8 @@ pub const ParallelRayTracer = struct {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
 
-        var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera._pixel_top_left.squaredMagnitude())));
+        const base_seed: u64 = @intFromFloat(@round(camera._pixel_top_left.squaredMagnitude()));
+        var prng: std.Random.DefaultPrng = .init(base_seed +% (@as(u64, y_screen) * 1000));
         const random = prng.random();
 
         for (0..image_width) |x_screen| {
@@ -98,6 +99,7 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
     const pixel_samples_scale = settings.pixel_samples_scale;
     const ray_tmin = settings.ray_tmin;
     const ray_tmax = settings.ray_tmax;
+    const max_depth = settings.max_ray_bounces;
 
     var pixel_color_sum = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
 
@@ -105,20 +107,7 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
         const ray = if (sample == 0) camera.getRay(random, x_screen, y_screen, true)
             else camera.getRay(random, x_screen, y_screen, false);
 
-        var closest_t = ray_tmax;
-        var closest_hit: ?HitRecord = null;
-
-        for (scene.hittables) |hittable| {
-            const hit = hittable.hit(ray, ray_tmin, ray_tmax);
-            if (hit) |record| {
-                if (record.t < closest_t) {
-                    closest_t = record.t;
-                    closest_hit = record;
-                }
-            }
-        }
-
-        pixel_color_sum = pixel_color_sum.add(rayColorVec3(ray, closest_hit));
+        pixel_color_sum = pixel_color_sum.add(rayColorVec3(ray, scene, ray_tmin, ray_tmax, max_depth, random));
     }
 
     const pixel_color = Color.fromVec3(pixel_color_sum.scalarMul(pixel_samples_scale));

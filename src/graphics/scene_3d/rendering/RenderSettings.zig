@@ -7,6 +7,7 @@ image_width: u16,
 image_height: u16,
 ray_tmin: Float,
 ray_tmax: Float,
+max_ray_bounces: u16,
 samples_per_pixel: u16,
 /// Color scale factor for a sum of pixel samples. A value of `1.0 / samples_per_pixel` leads to the pixel color being the average of the sampled colors.
 pixel_samples_scale: Float,

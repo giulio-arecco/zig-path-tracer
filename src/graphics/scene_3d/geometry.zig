@@ -29,7 +29,7 @@ pub const Sphere = struct {
             return null;
         }
 
-        const discr_sqrt = @sqrt(discr);
+        const discr_sqrt = if (discr == 0.0) 0.0 else @sqrt(discr);
 
         // Find the nearest root that lies in the acceptable range
         var root = (h - discr_sqrt) / a; // Remember, we use h and not -h in the reduced formula because it's defined as -b/2.0, so b = -2.0*h
@@ -41,7 +41,8 @@ pub const Sphere = struct {
         }
 
         const point = ray.at(root);
-        const outward_normal = (point.sub(self.center)).scalarDiv(self.radius);
+        const outward_normal = (point.sub(self.center)).normalized();
+
         const front_face, const normal = HitRecord.determineNormalOrientation(ray, outward_normal);
 
         return HitRecord {

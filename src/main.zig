@@ -46,10 +46,11 @@ pub fn main(init: std.process.Init) !void {
     const render_settings = RenderSettings {
             .image_width = IMG_WIDTH,
             .image_height = IMG_HEIGHT,
-            .ray_tmin = 0.0,
+            .ray_tmin = 0.001, // Avoid 0.0 to prevent shadow acne
             .ray_tmax = std.math.inf(Float),
-            .samples_per_pixel = 1,
-            .pixel_samples_scale = 1.0, // 1/samples_per_pixel
+            .max_ray_bounces = 10,
+            .samples_per_pixel = 50,
+            .pixel_samples_scale = 0.02, // 1/samples_per_pixel
     };
 
     const scene = Scene {
@@ -77,10 +78,10 @@ pub fn main(init: std.process.Init) !void {
         }
     };
 
-    const serial_raytracer = RayTracer {
-        .settings = render_settings,
-        .progress_root_node = root_node
-    };
+    // const serial_raytracer = RayTracer {
+    //     .settings = render_settings,
+    //     .progress_root_node = root_node
+    // };
 
     var threaded = std.Io.Threaded.init(init.gpa, .{});
     defer threaded.deinit();
@@ -94,9 +95,12 @@ pub fn main(init: std.process.Init) !void {
     const writer = &buf_writer;
     try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
 
-    var time_start = std.Io.Clock.awake.now(init.io);
-    serial_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
-    var time_end = std.Io.Clock.awake.now(init.io);
+    var time_start: std.Io.Timestamp = undefined;
+    var time_end: std.Io.Timestamp = undefined;
+
+    time_start = std.Io.Clock.awake.now(init.io);
+    // serial_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
+    time_end = std.Io.Clock.awake.now(init.io);
 
     const serial_duration = time_start.durationTo(time_end).toNanoseconds();
 

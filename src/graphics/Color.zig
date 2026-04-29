@@ -7,10 +7,23 @@ const math_utils = @import("../math_utils.zig");
 const Float = config.Float;
 const Vec3 = @import("../Vec3.zig");
 const approxEq = math_utils.approxEq;
+const normalizeFloat = math_utils.normalizeFloat;
 
 r: u8,
 g: u8,
 b: u8,
+
+/// Performs the *gamma 2* correction.\
+/// Asserts that `linear_component` is normalized.
+pub fn linearToGamma(linear_component: Float) Float {
+    std.debug.assert(linear_component >= 0.0 and linear_component <= 1.0);
+
+    if (linear_component > 0.0) {
+        return @sqrt(linear_component);
+    }
+
+    return 0.0;
+}
 
 pub inline fn toPacked(self: Color) u24 {
     return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
@@ -92,7 +105,7 @@ pub fn Gradient(comptime T: type) type {
         pub fn at(self: @This(), t: T) Color {
             std.debug.assert(t >= self.min_t and t <= self.max_t);
 
-            const norm_t = self.normalizeT(t);
+            const norm_t = normalizeFloat(T, t, .{ .min = self.min_t, .max = self.max_t });
             const start_r = @as(T, @floatFromInt(self.start_color.r));
             const start_g = @as(T, @floatFromInt(self.start_color.g));
             const start_b = @as(T, @floatFromInt(self.start_color.b));
@@ -111,15 +124,20 @@ pub fn Gradient(comptime T: type) type {
             const color = self.at(t);
             return color.toPacked();
         }
-
-        fn normalizeT(self: @This(), t: T) T {
-            std.debug.assert(t >= self.min_t and t <= self.max_t);
-            return (t - self.min_t) / (self.max_t - self.min_t);
-        }
     };
 }
 
-test "Color - Packed" {
+test "Color.linearToGamma" {
+    const eps = std.math.floatEps(Float);
+
+    try std.testing.expectEqual(@as(Float, 0.0), linearToGamma(0.0));
+    try std.testing.expectEqual(@as(Float, 1.0), linearToGamma(1.0));
+
+    try std.testing.expectApproxEqAbs(@as(Float, 0.5), linearToGamma(0.25), eps);
+    try std.testing.expectApproxEqAbs(@as(Float, std.math.sqrt2 / 2.0), linearToGamma(0.5), eps);
+}
+
+test "Color.toPacked" {
     try std.testing.expectEqual(0x00_00_00, (Color { .r = 0, .g = 0, .b = 0}).toPacked());
     try std.testing.expectEqual(0xFF_80_40, (Color { .r = 255, .g = 128, .b = 64}).toPacked());
     try std.testing.expectEqual(0xFF_FF_FF, (Color { .r = 255, .g = 255, .b = 255}).toPacked());
@@ -209,20 +227,4 @@ test "Gradient - Descending gradient atPacked" {
     try std.testing.expectEqual(0xFF_80_40, g_desc.atPacked(0.0));
     try std.testing.expectEqual(0x80_40_20, g_desc.atPacked(0.5));
     try std.testing.expectEqual(0x0, g_desc.atPacked(1.0));
-}
-
-test "Gradient - Normalization" {
-    const ftype = f32;
-
-    const g_scaled = Gradient(ftype) {
-        .start_color = .{ .r = 0, .g = 0, .b = 0},
-        .end_color = .{ .r = 255, .g = 128, .b = 64 },
-        .min_t = 10.0,
-        .max_t = 20.0
-    };
-
-    try std.testing.expectApproxEqAbs(0.0, g_scaled.normalizeT(10.0), 2 * std.math.floatEps(ftype));
-    try std.testing.expectApproxEqAbs(0.25, g_scaled.normalizeT(12.5), 2 * std.math.floatEps(ftype));
-    try std.testing.expectApproxEqAbs(0.5, g_scaled.normalizeT(15.0), 2 * std.math.floatEps(ftype));
-    try std.testing.expectApproxEqAbs(1.0, g_scaled.normalizeT(20.0), 2 * std.math.floatEps(ftype));
 }

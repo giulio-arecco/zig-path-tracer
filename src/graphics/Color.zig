@@ -13,16 +13,11 @@ r: u8,
 g: u8,
 b: u8,
 
-/// Performs the *gamma 2* correction.\
+/// Performs the *gamma 2* correction on a floating point value.\
 /// Asserts that `linear_component` is normalized.
-pub fn linearToGamma(linear_component: Float) Float {
+pub fn linearToGammaFloat(linear_component: Float) Float {
     std.debug.assert(linear_component >= 0.0 and linear_component <= 1.0);
-
-    if (linear_component > 0.0) {
-        return @sqrt(linear_component);
-    }
-
-    return 0.0;
+    return @sqrt(linear_component);
 }
 
 pub inline fn toPacked(self: Color) u24 {
@@ -130,11 +125,11 @@ pub fn Gradient(comptime T: type) type {
 test "Color.linearToGamma" {
     const eps = std.math.floatEps(Float);
 
-    try std.testing.expectEqual(@as(Float, 0.0), linearToGamma(0.0));
-    try std.testing.expectEqual(@as(Float, 1.0), linearToGamma(1.0));
+    try std.testing.expectEqual(@as(Float, 0.0), linearToGammaFloat(0.0));
+    try std.testing.expectEqual(@as(Float, 1.0), linearToGammaFloat(1.0));
 
-    try std.testing.expectApproxEqAbs(@as(Float, 0.5), linearToGamma(0.25), eps);
-    try std.testing.expectApproxEqAbs(@as(Float, std.math.sqrt2 / 2.0), linearToGamma(0.5), eps);
+    try std.testing.expectApproxEqAbs(@as(Float, 0.5), linearToGammaFloat(0.25), eps);
+    try std.testing.expectApproxEqAbs(@as(Float, std.math.sqrt2 / 2.0), linearToGammaFloat(0.5), eps);
 }
 
 test "Color.toPacked" {

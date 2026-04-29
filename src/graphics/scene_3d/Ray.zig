@@ -49,7 +49,7 @@ pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, de
 
     const grad = Gradient(Float) {
         .start_color = .{ .r = 255, .g = 255, .b = 255 },
-        .end_color = .{ .r = 128, .g = 180, .b = 255 }
+        .end_color = .{ .r = 64, .g = 125, .b = 255 }
     };
 
     const norm_dir = ray.dir.normalized();

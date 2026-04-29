@@ -110,6 +110,16 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
         pixel_color_sum = pixel_color_sum.add(rayColorVec3(ray, scene, ray_tmin, ray_tmax, max_depth, random));
     }
 
-    const pixel_color = Color.fromVec3(pixel_color_sum.scalarMul(pixel_samples_scale));
+    const pixel_color = blk: {
+        const col = pixel_color_sum.scalarMul(pixel_samples_scale);
+        const gamma_corrected = Vec3 {
+            .x = Color.linearToGammaFloat(col.x),
+            .y = Color.linearToGammaFloat(col.y),
+            .z = Color.linearToGammaFloat(col.z)
+        };
+
+        break :blk Color.fromVec3(gamma_corrected);
+    };
+
     std.mem.writeInt(u24, out, pixel_color.toPacked(), .big);
 }

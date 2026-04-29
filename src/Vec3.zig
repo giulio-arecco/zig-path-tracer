@@ -4,6 +4,8 @@ const std = @import("std");
 const math_utils = @import("math_utils.zig");
 const Float = @import("config.zig").Float;
 
+const rescaleFloat = math_utils.rescaleFloat;
+
 x: Float,
 y: Float,
 z: Float,
@@ -18,7 +20,7 @@ pub fn squaredMagnitude(self: Vec3) Float {
 }
 
 pub fn magnitude(self: Vec3) Float {
-    return std.math.sqrt(dot(self, self));
+    return @sqrt(dot(self, self));
 }
 
 pub fn isNormalized(v: Vec3) bool {
@@ -29,12 +31,11 @@ pub fn isNormalized(v: Vec3) bool {
 }
 
 pub fn normalized(v: Vec3) Vec3 {
-    std.debug.assert(v.x != 0.0 or v.y != 0.0 or v.z != 0.0);
+    const magnSq = v.squaredMagnitude();
+    std.debug.assert(magnSq > std.math.floatMin(Float));
 
     if (isNormalized(v)) return v;
-
-    const m = magnitude(v);
-    return .{ .x = v.x / m, .y = v.y / m,  .z = v.z / m };
+    return v.scalarDiv(@sqrt(magnSq));
 }
 
 pub fn cross(a: Vec3, b: Vec3) Vec3 {
@@ -104,6 +105,43 @@ pub fn scalarDiv (v: Vec3, t: Float) Vec3 {
     };
 }
 
+pub fn random(rand: std.Random) Vec3 {
+    return .{
+        .x = rand.float(Float),
+        .y = rand.float(Float),
+        .z = rand.float(Float)
+    };
+}
+
+pub fn randomInRange(rand: std.Random, min: Float, max: Float) Vec3 {
+    return .{
+        .x = rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
+        .y = rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
+        .z = rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max })
+    };
+}
+
+pub fn randomNormalized(rand: std.Random) Vec3 {
+    while (true) {
+        const p = randomInRange(rand, -1.0, 1.0);
+        const magnSq = p.squaredMagnitude();
+
+        if (magnSq <= 1.0 and magnSq >= std.math.floatMin(Float)) {
+            return p.scalarDiv(@sqrt(magnSq));
+        }
+    }
+}
+
+pub fn randomOnHemisphere(rand: std.Random, normal: Vec3) Vec3 {
+    const rand_unit = randomNormalized(rand);
+    if (dot(rand_unit, normal) > 0.0) {
+        return rand_unit;
+    }
+    else {
+        return rand_unit.negated();
+    }
+}
+
 pub fn vectorDot(a: @Vector(3, Float), b: @Vector(3, Float)) Float {
     return @reduce(.Add, a * b);
 }
@@ -124,13 +162,12 @@ pub fn vectorIsNormalized(v: @Vector(3, Float)) bool {
 }
 
 pub fn vectorNormalized(v: @Vector(3, Float)) @Vector(3, Float) {
-    std.debug.assert(v[0] != 0.0 or v[1] != 0.0 or v[2] != 0.0);
+    const magnSq = vectorSquaredMagnitude(v);
+    std.debug.assert(magnSq > std.math.floatMin(Float));
 
     if (vectorIsNormalized(v)) return v;
 
-    const m = vectorMagnitude(v);
-
-    const mv: @Vector(3, Float) = @splat(m);
+    const mv: @Vector(3, Float) = @splat(@sqrt(magnSq));
     return v / mv;
 }
 

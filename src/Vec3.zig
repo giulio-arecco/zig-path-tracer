@@ -145,6 +145,11 @@ pub fn randomOnHemisphere(rand: std.Random, normal: Vec3) Vec3 {
     }
 }
 
+pub fn isNearZero(self: Vec3) bool {
+    const tol = std.math.floatEps(Float);
+    return (@abs(self.x) < tol) and (@abs(self.y) < tol) and (@abs(self.z) < tol);
+}
+
 pub fn vectorDot(a: @Vector(3, Float), b: @Vector(3, Float)) Float {
     return @reduce(.Add, a * b);
 }
@@ -617,6 +622,37 @@ test "cross" {
     try std.testing.expect(isPositiveInf(c.x));
     try std.testing.expect(isNegativeInf(c.y));
     try std.testing.expect(isNan(c.z));
+}
+
+test "isNearZero" {
+    const tol = std.math.floatEps(Float);
+
+    var v = Vec3.zeroes;
+    try std.testing.expect(v.isNearZero());
+
+    v = Vec3{ .x = tol / 2.0, .y = -tol / 2.0, .z = 0.0 };
+    try std.testing.expect(v.isNearZero());
+
+    v = Vec3{ .x = tol, .y = 0.0, .z = 0.0 };
+    try std.testing.expect(!v.isNearZero());
+
+    v = Vec3{ .x = 0.0, .y = -tol, .z = 0.0 };
+    try std.testing.expect(!v.isNearZero());
+
+    v = Vec3{ .x = 0.0, .y = 0.0, .z = 1.0 };
+    try std.testing.expect(!v.isNearZero());
+
+    v = Vec3{ .x = inf, .y = inf, .z = inf };
+    try std.testing.expect(!v.isNearZero());
+
+    v = Vec3{ .x = -inf, .y = -inf, .z = -inf };
+    try std.testing.expect(!v.isNearZero());
+
+    v = Vec3{ .x = nan, .y = nan, .z = nan };
+    try std.testing.expect(!v.isNearZero());
+
+    v = Vec3{ .x = 0.0, .y = 2.0 * tol, .z = 0.0 };
+    try std.testing.expect(!v.isNearZero());
 }
 
 test "vectorDot" {

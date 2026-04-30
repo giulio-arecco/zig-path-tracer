@@ -42,9 +42,13 @@ pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, de
     const hit = scene.hit(ray, ray_tmin, ray_tmax);
 
     if (hit) |record| {
-        const new_dir = record.normal.add(Vec3.randomNormalized(rand)); // Lambertian reflection
-        const new_ray = Ray { .origin = record.point, .dir = new_dir };
-        return rayColorVec3(new_ray, scene, ray_tmin, ray_tmax, depth - 1, rand).scalarMul(0.5);
+        const res = record.material.scatter(ray, record, rand);
+
+        if (res.scattered_ray) |scattered_ray| {
+            return rayColorVec3(scattered_ray, scene, ray_tmin, ray_tmax, depth - 1, rand).mul(res.attenuation);
+        }
+
+        return LinearColor.black;
     }
 
     const grad = LinearGradient {
@@ -52,8 +56,8 @@ pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, de
         .end_color = LinearColor.init(0.25, 0.5, 1.0)
     };
 
-    const norm_dir = ray.dir.normalized();
-    return grad.at(0.5 * (norm_dir.y + 1.0));
+    const normalized_dir = ray.dir.normalized();
+    return grad.at(0.5 * (normalized_dir.y + 1.0));
 }
 
 test "at" {

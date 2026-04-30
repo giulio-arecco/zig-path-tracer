@@ -4,12 +4,14 @@ const fs_utils = @import("fs_utils.zig");
 const config = @import("config.zig");
 const rendering = graphics.scene_3d.rendering;
 const raytracing = rendering.raytracing;
+const materials = graphics.scene_3d.materials;
 
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const RenderSettings = rendering.RenderSettings;
 const RayTracer = raytracing.RayTracer;
 const ParallelRayTracer = raytracing.ParallelRayTracer;
+const Material = materials.Material;
 const Float = config.Float;
 
 const print = std.debug.print;
@@ -53,6 +55,9 @@ pub fn main(init: std.process.Init) !void {
             .pixel_samples_scale = 0.02, // 1/samples_per_pixel
     };
 
+    const mat_center = Material { .lambertian = .{ .albedo = .init(0.1, 0.2, 0.5) } };
+    const mat_ground = Material { .lambertian = .{ .albedo = .init(0.8, 0.8, 0.0) } };
+
     const scene = Scene {
         .camera = Camera.init(
             .{.x = 0.0, .y = 0.0, .z = 20.0},
@@ -66,13 +71,15 @@ pub fn main(init: std.process.Init) !void {
             .{
                 .sphere = .{
                     .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-                    .radius = 5.0
+                    .radius = 5.0,
+                    .material = mat_center
                 }
             },
             .{
                 .sphere = .{
                     .center =  .{ .x = 0.0, .y = -105.0, .z = 0.0 },
-                    .radius = 100.0
+                    .radius = 100.0,
+                    .material = mat_ground
                 }
             },
         }

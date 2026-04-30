@@ -5,6 +5,7 @@ const math_utils = @import("../../math_utils.zig");
 const Vec3 = @import("../../Vec3.zig");
 const Ray = @import("Ray.zig");
 const Float = config.Float;
+const Material = @import("materials.zig").Material;
 
 const dot = Vec3.dot;
 const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
@@ -13,6 +14,7 @@ const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
 pub const Sphere = struct {
     center: Vec3,
     radius: Float,
+    material: Material,
 
     pub fn hit(self: Sphere, ray: Ray, ray_tmin: Float, ray_tmax: Float) ?HitRecord {
         // Intersection between a ray and a sphere (implicit eq: (x - x_c)^2 + (y - y_c)^2 + (z - z_c)^2 = r^2, parametric eq: (P - C)^2 - r^2 = 0)\
@@ -49,6 +51,7 @@ pub const Sphere = struct {
           .t = root,
           .point = point,
           .normal = normal,
+          .material = self.material,
           .front_face = front_face
         };
     }
@@ -58,6 +61,7 @@ pub const HitRecord = struct {
     t: Float,
     point: Vec3,
     normal: Vec3,
+    material: Material,
     front_face: bool,
 
     /// Determines a normal vector orientation. The resulting normal will always point against the ray.\

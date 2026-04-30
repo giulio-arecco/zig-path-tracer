@@ -6,8 +6,8 @@ const math_utils = @import("../../math_utils.zig");
 const Vec3 = @import("../../Vec3.zig");
 const Scene = @import("Scene.zig");
 const Float = @import("../../config.zig").Float;
-const Color = @import("../Color.zig");
-const Gradient = Color.Gradient;
+const LinearColor = @import("../LinearColor.zig");
+const LinearGradient = LinearColor.LinearGradient;
 const HitRecord = @import("geometry.zig").HitRecord;
 const Interval = math_utils.Interval;
 
@@ -34,9 +34,9 @@ pub fn at(self: Ray, t: Float) Vec3 {
 //     return grad.at(0.5 * (norm_dir.y + 1.0));
 // }
 
-pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, depth: u16, rand: std.Random) Vec3 {
+pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, depth: u16, rand: std.Random) LinearColor {
     if (depth <= 0) {
-        return .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+        return LinearColor.black;
     }
 
     const hit = scene.hit(ray, ray_tmin, ray_tmax);
@@ -47,13 +47,13 @@ pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, de
         return rayColorVec3(new_ray, scene, ray_tmin, ray_tmax, depth - 1, rand).scalarMul(0.5);
     }
 
-    const grad = Gradient(Float) {
-        .start_color = .{ .r = 255, .g = 255, .b = 255 },
-        .end_color = .{ .r = 64, .g = 125, .b = 255 }
+    const grad = LinearGradient {
+        .start_color = LinearColor.white,
+        .end_color = LinearColor.init(0.25, 0.5, 1.0)
     };
 
     const norm_dir = ray.dir.normalized();
-    return grad.at(0.5 * (norm_dir.y + 1.0)).toVec3();
+    return grad.at(0.5 * (norm_dir.y + 1.0));
 }
 
 test "at" {

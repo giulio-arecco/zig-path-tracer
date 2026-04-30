@@ -5,10 +5,9 @@ const geometry = @import("../geometry.zig");
 const RenderSettings = @import("RenderSettings.zig");
 const Scene = @import("../Scene.zig");
 const Ray = @import("../Ray.zig");
-const Color = @import("../../Color.zig");
+const LinearColor = @import("../../LinearColor.zig");
 const Vec3 = @import("../../../Vec3.zig");
 const Float = config.Float;
-const Gradient = Color.Gradient;
 const HitRecord = geometry.HitRecord;
 
 const rayColorVec3 = Ray.rayColorVec3;
@@ -101,7 +100,7 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
     const ray_tmax = settings.ray_tmax;
     const max_depth = settings.max_ray_bounces;
 
-    var pixel_color_sum = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
+    var pixel_color_sum = LinearColor.black;
 
     for (0..samples_per_pixel) |sample| {
         const ray = if (sample == 0) camera.getRay(random, x_screen, y_screen, true)
@@ -111,14 +110,9 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
     }
 
     const pixel_color = blk: {
-        const col = pixel_color_sum.scalarMul(pixel_samples_scale);
-        const gamma_corrected = Vec3 {
-            .x = Color.linearToGammaFloat(col.x),
-            .y = Color.linearToGammaFloat(col.y),
-            .z = Color.linearToGammaFloat(col.z)
-        };
-
-        break :blk Color.fromVec3(gamma_corrected);
+        const linear = pixel_color_sum.scalarMul(pixel_samples_scale);
+        const srgb = linear.toSrgb8bit(.{ .clamp = .{} });
+        break :blk srgb;
     };
 
     std.mem.writeInt(u24, out, pixel_color.toPacked(), .big);

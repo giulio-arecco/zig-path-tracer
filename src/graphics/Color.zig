@@ -6,6 +6,7 @@ const math_utils = @import("../math_utils.zig");
 
 const Float = config.Float;
 const Vec3 = @import("../Vec3.zig");
+const Interval = math_utils.Interval(Float);
 const approxEq = math_utils.approxEq;
 const normalizeFloat = math_utils.normalizeFloat;
 
@@ -13,124 +14,38 @@ r: u8,
 g: u8,
 b: u8,
 
-/// Performs the *gamma 2* correction on a floating point value.\
-/// Asserts that `linear_component` is normalized.
-pub fn linearToGammaFloat(linear_component: Float) Float {
-    std.debug.assert(linear_component >= 0.0 and linear_component <= 1.0);
-    return @sqrt(linear_component);
-}
-
 pub inline fn toPacked(self: Color) u24 {
     return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
 }
 
-/// Converts RGB components from a floating-point interval `[min, max]` into an 8-bit `Color`.\
-/// `min` and `max` must be different, and each channel ranges from `min` to `max`, but may exceed those bounds.
-pub fn fromFloats(comptime T: type, r: T, g: T, b: T, min: T, max: T) Color {
-    comptime {
-        if (@typeInfo(T) != .float) {
-            @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
-        }
+pub const Gradient = struct {
+    start_color: Color,
+    end_color: Color,
+    t_range: Interval = .{ .min = 0.0, .max = 1.0 },
+
+    pub fn at(self: Gradient, t: Float) Color {
+        std.debug.assert(self.t_range.contains(t));
+
+        const norm_t = normalizeFloat(Float, t, self.t_range);
+        const start_r = @as(Float, @floatFromInt(self.start_color.r));
+        const start_g = @as(Float, @floatFromInt(self.start_color.g));
+        const start_b = @as(Float, @floatFromInt(self.start_color.b));
+        const end_r = @as(Float, @floatFromInt(self.end_color.r));
+        const end_g = @as(Float, @floatFromInt(self.end_color.g));
+        const end_b = @as(Float, @floatFromInt(self.end_color.b));
+
+        return Color {
+            .r = @intFromFloat(@round(std.math.lerp(start_r, end_r, norm_t))),
+            .g = @intFromFloat(@round(std.math.lerp(start_g, end_g, norm_t))),
+            .b = @intFromFloat(@round(std.math.lerp(start_b, end_b, norm_t))),
+        };
     }
 
-    std.debug.assert(!approxEq(Float, max, min));
-
-    const scaled_r = if (r < min) min else if (r > max) max else r;
-    const scaled_g = if (g < min) min else if (g > max) max else g;
-    const scaled_b = if (b < min) min else if (b > max) max else b;
-
-    return .{
-        .r = @intFromFloat(@round((scaled_r - min) * 255.0 / (max - min))),
-        .g = @intFromFloat(@round((scaled_g - min) * 255.0 / (max - min))),
-        .b = @intFromFloat(@round((scaled_b - min) * 255.0 / (max - min))),
-    };
-}
-
-/// Converts RGB components from a Vec3 with all coordinates in the range [0, 1] into an 8-bit `Color`.\
-/// `v.x` is mapped to the R channel, `v.y` to G and `v.z` to B.
-pub fn fromVec3(v: Vec3) Color {
-    std.debug.assert(v.x >= 0.0 and v.x <= 1.0);
-    std.debug.assert(v.y >= 0.0 and v.y <= 1.0);
-    std.debug.assert(v.z >= 0.0 and v.z <= 1.0);
-
-    return .{
-        .r = @intFromFloat(@round(v.x * 255.0)),
-        .g = @intFromFloat(@round(v.y * 255.0)),
-        .b = @intFromFloat(@round(v.z * 255.0))
-    };
-}
-
-pub fn toFloats(self: Color, comptime T: type) struct {T, T, T} {
-    comptime {
-        if (@typeInfo(T) != .float) {
-            @compileError("Type parameter T must be a float type, received: '" ++ @typeName(T) ++ "'.");
-        }
+    pub fn atPacked(self: Gradient, t: Float) u24 {
+        const color = self.at(t);
+        return color.toPacked();
     }
-
-    return .{
-        @as(T, @floatFromInt(self.r)) / 255.0,
-        @as(T, @floatFromInt(self.g)) / 255.0,
-        @as(T, @floatFromInt(self.b)) / 255.0,
-    };
-}
-
-/// Returns a Vec3 with all coordinates ranging from 0.0 to 1.0
-pub fn toVec3(self: Color) Vec3 {
-    return .{
-        .x = @as(Float, @floatFromInt(self.r)) / 255.0,
-        .y = @as(Float, @floatFromInt(self.g)) / 255.0,
-        .z = @as(Float, @floatFromInt(self.b)) / 255.0,
-    };
-}
-
-pub fn Gradient(comptime T: type) type {
-    comptime {
-        if (@typeInfo(T) != .float) {
-            @compileError("Gradient requires a float type (i.e. f32, f64), received: '" ++ @typeName(T) ++ "'.");
-        }
-    }
-
-    return struct {
-        start_color: Color,
-        end_color: Color,
-
-        min_t: T = 0.0,
-        max_t: T = 1.0,
-
-        pub fn at(self: @This(), t: T) Color {
-            std.debug.assert(t >= self.min_t and t <= self.max_t);
-
-            const norm_t = normalizeFloat(T, t, .{ .min = self.min_t, .max = self.max_t });
-            const start_r = @as(T, @floatFromInt(self.start_color.r));
-            const start_g = @as(T, @floatFromInt(self.start_color.g));
-            const start_b = @as(T, @floatFromInt(self.start_color.b));
-            const end_r = @as(T, @floatFromInt(self.end_color.r));
-            const end_g = @as(T, @floatFromInt(self.end_color.g));
-            const end_b = @as(T, @floatFromInt(self.end_color.b));
-
-            return Color {
-                .r = @intFromFloat(@round(std.math.lerp(start_r, end_r, norm_t))),
-                .g = @intFromFloat(@round(std.math.lerp(start_g, end_g, norm_t))),
-                .b = @intFromFloat(@round(std.math.lerp(start_b, end_b, norm_t))),
-            };
-        }
-
-        pub fn atPacked(self: @This(), t: T) u24 {
-            const color = self.at(t);
-            return color.toPacked();
-        }
-    };
-}
-
-test "Color.linearToGamma" {
-    const eps = std.math.floatEps(Float);
-
-    try std.testing.expectEqual(@as(Float, 0.0), linearToGammaFloat(0.0));
-    try std.testing.expectEqual(@as(Float, 1.0), linearToGammaFloat(1.0));
-
-    try std.testing.expectApproxEqAbs(@as(Float, 0.5), linearToGammaFloat(0.25), eps);
-    try std.testing.expectApproxEqAbs(@as(Float, std.math.sqrt2 / 2.0), linearToGammaFloat(0.5), eps);
-}
+};
 
 test "Color.toPacked" {
     try std.testing.expectEqual(0x00_00_00, (Color { .r = 0, .g = 0, .b = 0}).toPacked());
@@ -138,50 +53,8 @@ test "Color.toPacked" {
     try std.testing.expectEqual(0xFF_FF_FF, (Color { .r = 255, .g = 255, .b = 255}).toPacked());
 }
 
-test "Color.fromFloats" {
-    const c1 = Color.fromFloats(f32, 0.0, 0.5, 1.0, 0.0, 1.0);
-    try std.testing.expectEqual(Color{ .r = 0, .g = 128, .b = 255 }, c1);
-
-    const c2 = Color.fromFloats(f32, 10.0, 15.0, 20.0, 10.0, 20.0);
-    try std.testing.expectEqual(Color{ .r = 0, .g = 128, .b = 255 }, c2);
-
-    const c3 = Color.fromFloats(f32, -10.0, 15.0, 30.0, 10.0, 20.0);
-    try std.testing.expectEqual(Color{ .r = 0, .g = 128, .b = 255 }, c3);
-}
-
-test "Color.toFloats" {
-    const eps = 2 * std.math.floatEps(f32);
-    const c = Color{ .r = 0, .g = 128, .b = 255 };
-    const floats = c.toFloats(f32);
-
-    try std.testing.expectApproxEqAbs(@as(f32, 0.0), floats[0], eps);
-    try std.testing.expectApproxEqAbs(@as(f32, 128.0) / 255.0, floats[1], eps);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), floats[2], eps);
-}
-
-test "Color.toVec3" {
-    const eps = @sqrt(std.math.floatEps(Float));
-    const c = Color{ .r = 0, .g = 128, .b = 255 };
-    const vec = c.toVec3();
-
-    try std.testing.expectApproxEqRel(@as(Float, 0.0), vec.x, eps);
-    try std.testing.expectApproxEqRel(@as(Float, 128.0) / 255.0, vec.y, eps);
-    try std.testing.expectApproxEqRel(@as(Float, 1.0), vec.z, eps);
-}
-
-test "Color.fromVec3" {
-    const c1 = Color.fromVec3(.{ .x = 0.0, .y = 0.5, .z = 1.0 });
-    try std.testing.expectEqual(Color{ .r = 0, .g = 128, .b = 255 }, c1);
-
-    const c2 = Color.fromVec3(.{ .x = 0.25, .y = 0.75, .z = 0.33333333 });
-    try std.testing.expectEqual(Color{ .r = 64, .g = 191, .b = 85 }, c2);
-
-    const c3 = Color.fromVec3(.{ .x = 1.0, .y = 1.0, .z = 1.0 });
-    try std.testing.expectEqual(Color{ .r = 255, .g = 255, .b = 255 }, c3);
-}
-
 test "Gradient - Ascending gradient at" {
-    const g_asc = Gradient(f32) {
+    const g_asc = Gradient {
         .start_color = .{ .r = 0, .g = 0, .b = 0},
         .end_color = .{ .r = 255, .g = 128, .b = 64 },
     };
@@ -192,7 +65,7 @@ test "Gradient - Ascending gradient at" {
 }
 
 test "Gradient - Ascending gradient atPacked" {
-    const g_asc = Gradient(f32) {
+    const g_asc = Gradient {
         .start_color = .{ .r = 0, .g = 0, .b = 0},
         .end_color = .{ .r = 255, .g = 128, .b = 64 },
     };
@@ -203,7 +76,7 @@ test "Gradient - Ascending gradient atPacked" {
 }
 
 test "Gradient - Descending gradient at" {
-    const g_desc = Gradient(f32) {
+    const g_desc = Gradient {
         .start_color = .{ .r = 255, .g = 128, .b = 64},
         .end_color = .{ .r = 0, .g = 0, .b = 0 },
     };
@@ -214,7 +87,7 @@ test "Gradient - Descending gradient at" {
 }
 
 test "Gradient - Descending gradient atPacked" {
-    const g_desc = Gradient(f32) {
+    const g_desc = Gradient {
         .start_color = .{ .r = 255, .g = 128, .b = 64},
         .end_color = .{ .r = 0, .g = 0, .b = 0 },
     };

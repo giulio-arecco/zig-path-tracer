@@ -10,7 +10,7 @@ const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
 
 pub const FillMethod = union(enum) {
     color: Color,
-    gradient: Gradient(f32)
+    gradient: Gradient
 };
 
 fn computePathStrLen(comptime path_components: []const []const u8) usize {

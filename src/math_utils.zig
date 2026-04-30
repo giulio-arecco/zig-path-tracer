@@ -163,8 +163,8 @@ pub fn evaluateDiscriminantReduced(comptime T: type, a: T, h: T, c: T) struct {u
 
 pub fn Interval(comptime T: type) type {
     switch (@typeInfo(T)) {
-        .comptime_float, .comptime_int, .int, .float => {},
-        else => @compileError("T must be a numeric type (comptime_float, float, comptime_int, int), found '" ++ @typeName(T) ++ "'.")
+        .int, .float => {},
+        else => @compileError("T must be a numeric type (i.e. float, int), found '" ++ @typeName(T) ++ "'.")
     }
 
     return struct {

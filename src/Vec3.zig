@@ -10,6 +10,9 @@ x: Float,
 y: Float,
 z: Float,
 
+pub const ones = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
+
+pub const zeroes = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
 
 pub fn dot(a: Vec3, b: Vec3) Float {
     return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -312,23 +315,23 @@ test "isEqual" {
     var b = Vec3 { .x = -5.0, .y = 10.0, .z = 3.0};
     try std.testing.expect(isApproxEq(a, b));
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
-    b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
+    b = Vec3.zeroes;
     try std.testing.expect(isApproxEq(a, b));
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
     b = Vec3 { .x = -0.0, .y = 0.0, .z = -0.0};
     try std.testing.expect(isApproxEq(a, b));
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
     b = Vec3 { .x = -1.0, .y = 0.0, .z = 0.0};
     try std.testing.expect(!isApproxEq(a, b));
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
     b = Vec3 { .x = 0.0, .y = 5.0, .z = 0.0};
     try std.testing.expect(!isApproxEq(a, b));
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
     b = Vec3 { .x = 0.0, .y = 0.0, .z = -12.0};
     try std.testing.expect(!isApproxEq(a, b));
 
@@ -357,7 +360,7 @@ test "scalarMul" {
     try std.testing.expectApproxEqAbs(20.0, b.y, eps);
     try std.testing.expectApproxEqAbs(6.0, b.z, eps);
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
     b = a.scalarMul(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
     try std.testing.expectApproxEqAbs(0.0, b.y, eps);
@@ -389,14 +392,14 @@ test "scalarMul" {
     try std.testing.expect(isNegativeInf(b.y));
     try std.testing.expect(isPositiveInf(b.z));
 
-    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0};
+    a = Vec3.ones;
     t = inf;
     b = a.scalarMul(t);
     try std.testing.expect(isPositiveInf(b.x));
     try std.testing.expect(isPositiveInf(b.y));
     try std.testing.expect(isPositiveInf(b.z));
 
-    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
+    a = Vec3.ones;
     t = -inf;
     b = a.scalarMul(t);
     try std.testing.expect(isNegativeInf(b.x));
@@ -432,7 +435,7 @@ test "scalarDiv" {
     try std.testing.expectApproxEqAbs(5.0, b.y, eps);
     try std.testing.expectApproxEqAbs(1.5, b.z, eps);
 
-    a = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0};
+    a = Vec3.zeroes;
     b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
     try std.testing.expectApproxEqAbs(0.0, b.y, eps);
@@ -451,14 +454,14 @@ test "scalarDiv" {
     try std.testing.expect(isNan(b.y));
     try std.testing.expect(isNan(b.z));
 
-    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0};
+    a = Vec3.ones;
     t = inf;
     b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
     try std.testing.expectApproxEqAbs(0.0, b.y, eps);
     try std.testing.expectApproxEqAbs(0.0, b.z, eps);
 
-    a = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
+    a = Vec3.ones;
     t = -inf;
     b = a.scalarDiv(t);
     try std.testing.expectApproxEqAbs(0.0, b.x, eps);
@@ -497,7 +500,7 @@ test "dot" {
 test "squaredMagnitude" {
     try std.testing.expectApproxEqAbs(134.0, (Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 }).squaredMagnitude(), eps);
     try std.testing.expectApproxEqAbs(134.0, (Vec3 { .x = -5.0, .y = 10.0, .z = 3.0 }).squaredMagnitude(), eps);
-    try std.testing.expectApproxEqAbs(0.0, (Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 }).squaredMagnitude(), eps);
+    try std.testing.expectApproxEqAbs(0.0, (Vec3.zeroes).squaredMagnitude(), eps);
     try std.testing.expect(isPositiveInf((Vec3 { .x = inf, .y = 10.0, .z = -3.0 }).squaredMagnitude()));
     try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = inf, .z = -3.0 }).squaredMagnitude()));
     try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = 10.0, .z = -3.0 }).squaredMagnitude()));
@@ -506,7 +509,7 @@ test "squaredMagnitude" {
 test "magnitude" {
     try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), (Vec3 { .x = -5.0, .y = 10.0, .z = 3.0 }).magnitude(), eps);
     try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), (Vec3 { .x = 5.0, .y = -10.0, .z = -3.0 }).magnitude(), eps);
-    try std.testing.expectApproxEqAbs(0.0, (Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 }).magnitude(), eps);
+    try std.testing.expectApproxEqAbs(0.0, (Vec3.zeroes).magnitude(), eps);
     try std.testing.expect(isPositiveInf((Vec3 { .x = inf, .y = 10.0, .z = -3.0 }).magnitude()));
     try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = inf, .z = -3.0 }).magnitude()));
     try std.testing.expect(isPositiveInf((Vec3 { .x = -inf, .y = 10.0, .z = -3.0 }).magnitude()));
@@ -545,7 +548,7 @@ test "squaredDistance" {
     b = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
     try std.testing.expectApproxEqAbs(474.0, a.squaredDistance(b), eps);
 
-    b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
+    b = Vec3.zeroes;
     try std.testing.expectApproxEqAbs(134.0, a.squaredDistance(b), eps);
 
     b = Vec3 { .x = inf, .y = inf, .z = inf };
@@ -571,7 +574,7 @@ test "distance" {
     b = Vec3 { .x = -2.0, .y = -15.0, .z = 17.0 };
     try std.testing.expectApproxEqAbs(std.math.sqrt(474.0), a.distance(b), eps);
 
-    b = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
+    b = Vec3.zeroes;
     try std.testing.expectApproxEqAbs(std.math.sqrt(134.0), a.distance(b), eps);
 
     b = Vec3 { .x = inf, .y = inf, .z = inf };

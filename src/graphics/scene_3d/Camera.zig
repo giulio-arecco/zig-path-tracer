@@ -86,7 +86,7 @@ pub fn getRay(self: Camera, random: std.Random, x_screen: usize, y_screen: usize
     };
 }
 
-pub fn sample_unit_square(prng: std.Random) Vec3 {
+fn sample_unit_square(prng: std.Random) Vec3 {
     return .{ .x = prng.float(Float) - 0.5, .y = prng.float(Float) - 0.5, .z = 0.0 };
 }
 

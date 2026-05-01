@@ -57,6 +57,8 @@ pub fn main(init: std.process.Init) !void {
 
     const mat_center = Material { .lambertian = .{ .albedo = .init(0.1, 0.2, 0.5) } };
     const mat_ground = Material { .lambertian = .{ .albedo = .init(0.8, 0.8, 0.0) } };
+    const mat_left = Material { .metal = .{ .albedo = .init(0.8, 0.8, 0.8) } };
+    const mat_right = Material { .metal = .{ .albedo = .init(0.8, 0.6, 0.2) } };
 
     const scene = Scene {
         .camera = Camera.init(
@@ -69,17 +71,31 @@ pub fn main(init: std.process.Init) !void {
         ),
         .hittables = &.{
             .{
-                .sphere = .{
+                .sphere = .{ // center
                     .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
                     .radius = 5.0,
                     .material = mat_center
                 }
             },
             .{
-                .sphere = .{
-                    .center =  .{ .x = 0.0, .y = -105.0, .z = 0.0 },
-                    .radius = 100.0,
+                .sphere = .{ // ground
+                    .center =  .{ .x = 0.0, .y = -1005.0, .z = 0.0 },
+                    .radius = 1000.0,
                     .material = mat_ground
+                }
+            },
+            .{
+                .sphere = .{ // right
+                    .center =  .{ .x = 12.0, .y = 0.0, .z = 0.0 },
+                    .radius = 5.0,
+                    .material = mat_right
+                }
+            },
+            .{
+                .sphere = .{ // left
+                    .center =  .{ .x = -12.0, .y = 0.0, .z = 0.0 },
+                    .radius = 5.0,
+                    .material = mat_left
                 }
             },
         }

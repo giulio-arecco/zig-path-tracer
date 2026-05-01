@@ -20,20 +20,6 @@ pub fn at(self: Ray, t: Float) Vec3 {
     return self.origin.add(self.dir.scalarMul(t));
 }
 
-// pub fn rayColor(ray: Ray, hit: ?HitRecord) Color {
-//     if (hit) |record| {
-//         return Color.fromFloats(Float, record.normal.x, record.normal.y, record.normal.z, -1.0, 1.0);
-//     }
-
-//     const grad = Gradient(Float) {
-//         .start_color = .{ .r = 255, .g = 255, .b = 255 },
-//         .end_color = .{ .r = 128, .g = 180, .b = 255 }
-//     };
-
-//     const norm_dir = ray.dir.normalized();
-//     return grad.at(0.5 * (norm_dir.y + 1.0));
-// }
-
 pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, depth: u16, rand: std.Random) LinearColor {
     if (depth <= 0) {
         return LinearColor.black;

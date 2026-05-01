@@ -150,6 +150,18 @@ pub fn isNearZero(self: Vec3) bool {
     return (@abs(self.x) < tol) and (@abs(self.y) < tol) and (@abs(self.z) < tol);
 }
 
+pub fn reflect(v: Vec3, axis: Vec3) Vec3 {
+    return v.add(axis.scalarMul(- 2.0 * dot(v, axis) / axis.squaredMagnitude()));
+}
+
+/// Asserts that `unit` is normalized.
+pub fn reflectOnUnit(v: Vec3, unit: Vec3) Vec3 {
+    std.debug.assert(unit.isNormalized());
+
+    const proj = dot(v, unit);
+    return v.add(unit.scalarMul(- 2.0 * proj));
+}
+
 pub fn vectorDot(a: @Vector(3, Float), b: @Vector(3, Float)) Float {
     return @reduce(.Add, a * b);
 }
@@ -653,6 +665,37 @@ test "isNearZero" {
 
     v = Vec3{ .x = 0.0, .y = 2.0 * tol, .z = 0.0 };
     try std.testing.expect(!v.isNearZero());
+}
+
+test "reflect" {
+    const v = Vec3{ .x = 1.0, .y = -1.0, .z = 0.0 };
+    var axis = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
+    var r = reflect(v, axis);
+    try std.testing.expectApproxEqAbs(1.0, r.x, eps);
+    try std.testing.expectApproxEqAbs(1.0, r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+
+    axis = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    r = reflect(v, axis);
+    try std.testing.expectApproxEqAbs(1.0, r.x, eps);
+    try std.testing.expectApproxEqAbs(1.0, r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+}
+
+test "reflectOnUnit" {
+    var v = Vec3{ .x = 1.0, .y = -1.0, .z = 0.0 };
+    var unit = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
+    var r = reflectOnUnit(v, unit);
+    try std.testing.expectApproxEqAbs(1.0, r.x, eps);
+    try std.testing.expectApproxEqAbs(1.0, r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+
+    v = Vec3{ .x = -5.0, .y = 10.0, .z = 3.0 };
+    unit = Vec3{ .x = 0.0, .y = 0.0, .z = 1.0 };
+    r = reflectOnUnit(v, unit);
+    try std.testing.expectApproxEqAbs(-5.0, r.x, eps);
+    try std.testing.expectApproxEqAbs(10.0, r.y, eps);
+    try std.testing.expectApproxEqAbs(-3.0, r.z, eps);
 }
 
 test "vectorDot" {

@@ -5,7 +5,10 @@ const config = @import("config.zig");
 const rendering = graphics.scene_3d.rendering;
 const raytracing = rendering.raytracing;
 const materials = graphics.scene_3d.materials;
+const math_utils = @import("math_utils.zig");
 
+const Vec3 = @import("Vec3.zig");
+const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const RenderSettings = rendering.RenderSettings;
@@ -19,8 +22,8 @@ const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
 const computePathStrLen = fs_utils.computePathStrLen;
 
-const IMG_HEIGHT= 1024;
-const IMG_WIDTH = 1024;
+const IMG_WIDTH = 1200;
+const IMG_HEIGHT= 675;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
@@ -50,95 +53,22 @@ pub fn main(init: std.process.Init) !void {
             .image_height = IMG_HEIGHT,
             .ray_tmin = 0.001, // Avoid 0.0 to prevent shadow acne
             .ray_tmax = std.math.inf(Float),
-            .max_ray_bounces = 10,
-            .samples_per_pixel = 50,
-            .pixel_samples_scale = 0.02, // 1/samples_per_pixel
+            .max_ray_bounces = 50,
+            .samples_per_pixel = 500,
+            .pixel_samples_scale = 0.002, // 1/samples_per_pixel
     };
 
-    const mat_center = Material { .lambertian = .{ .albedo = .init(0.1, 0.2, 0.5) } };
-    const mat_ground = Material { .lambertian = .{ .albedo = .init(0.8, 0.8, 0.0) } };
-    const mat_metal_1 = Material { .metal = .{ .albedo = .init(0.8, 0.8, 0.8), .fuzz = 0.0 } };
-    const mat_metal_2 = Material { .metal = .{ .albedo = .init(0.8, 0.6, 0.2), .fuzz = 0.25 } };
-    const mat_metal_3 = Material { .metal = .{ .albedo = .init(0.0, 0.4, 0.65), .fuzz = 0.5} };
-    const mat_metal_4 = Material { .metal = .{ .albedo = .init(0.35, 0.0, 0.65), .fuzz = 0.75 } };
-    const mat_glass_outer = Material { .dielectic = .{ .refractive_index = 1.5 } }; // outer glass sphere
-    const mat_glass_inner = Material { .dielectic = .{ .refractive_index = 1.0 / 1.5 } }; // inner air sphere
+    const camera = Camera.initLookAt(
+        .{ .x = 13.0, .y = 2.0, .z = 3.0},
+        .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+        20.0,
+        10.0,
+        0.6,
+        render_settings);
+    var scene = try Scene.initWithCapacity(camera, init.arena.allocator(), 256);
+    defer scene.deinit();
 
-    const scene = Scene {
-        // .camera = Camera.init(
-        //     .{.x = 0.0, .y = 4.0, .z = 20.0},
-        //     .{.x = 0.0, .y = 1.0, .z = 0.0},
-        //     .{.x = 1.0, .y = 0.0, .z = 0.0},
-        //     10.0,
-        //     90.0,
-        //     render_settings
-        // ),
-        .camera = Camera.initLookAt(
-            .{ .x = -50.0, .y = 50.0, .z = 50.0},
-            .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-            30.0,
-            86.60,
-            5.0,
-            render_settings),
-        .hittables = &.{
-            .{
-                .sphere = .{ // center
-                    .center =  .{ .x = 0.0, .y = 10.0, .z = 0.0 },
-                    .radius = 5.0,
-                    .material = mat_center
-                }
-            },
-            .{
-                .sphere = .{ // ground
-                    .center =  .{ .x = 0.0, .y = -1003.0, .z = 0.0 },
-                    .radius = 1000.0,
-                    .material = mat_ground
-                }
-            },
-            .{
-                .sphere = .{ // metal1
-                    .center =  .{ .x = -14.0, .y = 0.0, .z = 0.0 },
-                    .radius = 3.0,
-                    .material = mat_metal_1
-                }
-            },
-            .{
-                .sphere = .{ // metal2
-                    .center =  .{ .x = -7.0, .y = 0.0, .z = 0.0 },
-                    .radius = 3.0,
-                    .material = mat_metal_2
-                }
-            },
-            .{
-                .sphere = .{ // metal3
-                    .center =  .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-                    .radius = 3.0,
-                    .material = mat_metal_3
-                }
-            },
-            .{
-                .sphere = .{ // metal4
-                    .center =  .{ .x = 7.0, .y = 0.0, .z = 0.0 },
-                    .radius = 3.0,
-                    .material = mat_metal_4
-                }
-            },
-            .{
-                .sphere = .{ // outer glass
-                    .center =  .{ .x = 14.0, .y = 0.0, .z = 0.0 },
-                    .radius = 3.0,
-                    .material = mat_glass_outer
-                }
-            },
-            .{
-                .sphere = .{ // inner glass
-                    .center =  .{ .x = 14.0, .y = 0.0, .z = 0.0 },
-                    .radius = 2.0,
-                    .material = mat_glass_inner
-                }
-            },
-        }
-    };
+    try generateScene(&scene, 1.0, 0.2);
 
     // const serial_raytracer = RayTracer {
     //     .settings = render_settings,
@@ -183,6 +113,81 @@ pub fn main(init: std.process.Init) !void {
     , .{ @divTrunc(serial_duration, std.time.ns_per_ms), @divTrunc(parallel_duration, std.time.ns_per_ms), @as(f128, @floatFromInt(serial_duration)) / @as(f128, @floatFromInt(parallel_duration))});
 
     try memory_map.write(init.io);
+}
+
+fn generateScene(scene: *Scene, big_radius: Float, small_radius: Float) !void {
+    const ground_material = Material { .lambertian = .{ .albedo = .init(0.5, 0.5, 0.5) } };
+    const center_ground = Vec3 { .x = 0.0, .y = -1000.0, .z = 0.0 };
+    try scene.add(.{ .sphere = .{ .center = center_ground, .radius = 1000, .material = ground_material } });
+
+    const material_1 = Material { .dielectic = .{ .refractive_index = 1.5 }};
+    const center_1 = Vec3 { .x = 0.0, .y = 1.0, .z = 0.0 };
+    try scene.add(.{ .sphere = .{ .center = center_1, .radius = 1.0, .material = material_1 } });
+
+    const material_1_inside = Material { .dielectic = .{ .refractive_index = 1.0 / 1.5 }};
+    try scene.add(.{ .sphere = .{ .center = center_1, .radius = 0.5, .material = material_1_inside } });
+
+    const material_2 = Material { .lambertian = .{ .albedo = .init(0.4, 0.2, 0.1) } };
+    const center_2 = Vec3 { .x = -4.0, .y = 1.0, .z = 0.0 };
+    try scene.add(.{ .sphere = .{ .center = center_2, .radius = 1.0, .material = material_2 } });
+
+    const material_3 = Material { .metal = .{ .albedo = .init(0.7, 0.6, 0.5), .fuzz = 0.0 }};
+    const center_3 = Vec3 { .x = 4.0, .y = 1.0, .z = 0.0 };
+    try scene.add(.{ .sphere = .{ .center = center_3, .radius = 1.0, .material = material_3 } });
+
+    var prng: std.Random.DefaultPrng = .init(121);
+    const rand = prng.random();
+    const safe_jitter_area: Float = 1.0 - (2.0 * small_radius);
+    const min_dist = big_radius + small_radius + 0.1;
+    const min_dist_sq = min_dist * min_dist;
+    for(0..22) |a| {
+        for (0..22) |b| {
+            var attempt: usize = 0;
+            var position_found = false;
+            var center: Vec3 = undefined;
+
+            while (attempt < 20) : (attempt += 1) {
+                const cell_x = @as(Float, @floatFromInt(@as(isize, @intCast(a)) - 11));
+                const cell_z = @as(Float, @floatFromInt(@as(isize, @intCast(b)) - 11));
+
+                const x_offset = cell_x + small_radius + (safe_jitter_area * rand.float(Float));
+                const z_offset = cell_z + small_radius + (safe_jitter_area * rand.float(Float));
+                center = Vec3 { .x = x_offset, .y = small_radius, .z = z_offset };
+
+                const dist_1_sq = Vec3.squaredDistance(center, center_1);
+                const dist_2_sq = Vec3.squaredDistance(center, center_2);
+                const dist_3_sq = Vec3.squaredDistance(center, center_3);
+
+                if (dist_1_sq > min_dist_sq and dist_2_sq > min_dist_sq and dist_3_sq > min_dist_sq) {
+                    position_found = true;
+                    break;
+                }
+            }
+
+            if (position_found) {
+                const choose_mat = rand.float(Float);
+
+                if (choose_mat < 0.7) {
+                    // lambertian
+                    const albedo = LinearColor.random(rand).mul(LinearColor.random(rand));
+                    const lambertian = Material { .lambertian = .{ .albedo = albedo } };
+                    try scene.add(.{ .sphere = .{ .center = center, .radius = small_radius, .material = lambertian } });
+                }
+                else if (choose_mat < 0.85) {
+                    // metal
+                    const albedo = LinearColor.randomInRange(rand, 0.5, 1.0);
+                    const fuzz = math_utils.rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0 }, .{ .min = 0.0, .max = 0.5});
+                    const metal = Material { .metal = .{ .albedo = albedo, .fuzz = fuzz }};
+                    try scene.add(.{ .sphere = .{ .center = center, .radius = small_radius, .material = metal } });
+                }
+                else {
+                    // glass
+                    const dielectric = Material { .dielectic = .{ .refractive_index = 1.5 }};
+                    try scene.add(.{ .sphere = .{ .center = center, .radius = small_radius, .material = dielectric } });
+                }
+            }
+        }
+    }
 }
 
 test {

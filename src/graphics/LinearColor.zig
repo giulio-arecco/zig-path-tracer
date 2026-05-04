@@ -8,8 +8,10 @@ const Float = config.Float;
 const Vec3 = @import("../Vec3.zig");
 const Color = @import("Color.zig");
 const Interval = math_utils.Interval(Float);
+
 const approxEq = math_utils.approxEq;
 const normalizeFloat = math_utils.normalizeFloat;
+const rescaleFloat = math_utils.rescaleFloat;
 
 v: @Vector(3, Float),
 
@@ -238,6 +240,18 @@ pub fn scalarDiv(self: LinearColor, scalar: Float) LinearColor {
     std.debug.assert(scalar != 0.0);
     const s_vec: @Vector(3, Float) = @splat(scalar);
     return .{ .v = self.v / s_vec };
+}
+
+pub fn random(rand: std.Random) LinearColor {
+    return .init(rand.float(Float), rand.float(Float), rand.float(Float));
+}
+
+pub fn randomInRange(rand: std.Random, min: Float, max: Float) LinearColor {
+    return .init(
+        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
+        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
+        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max })
+    );
 }
 
 // TESTING

@@ -65,14 +65,21 @@ pub fn main(init: std.process.Init) !void {
     const mat_glass_inner = Material { .dielectic = .{ .refractive_index = 1.0 / 1.5 } }; // inner air sphere
 
     const scene = Scene {
-        .camera = Camera.init(
-            .{.x = 0.0, .y = 4.0, .z = 20.0},
-            .{.x = 0.0, .y = 1.0, .z = 0.0},
-            .{.x = 1.0, .y = 0.0, .z = 0.0},
-            10.0,
-            90.0,
-            render_settings
-        ),
+        // .camera = Camera.init(
+        //     .{.x = 0.0, .y = 4.0, .z = 20.0},
+        //     .{.x = 0.0, .y = 1.0, .z = 0.0},
+        //     .{.x = 1.0, .y = 0.0, .z = 0.0},
+        //     10.0,
+        //     90.0,
+        //     render_settings
+        // ),
+        .camera = Camera.initLookAt(
+            .{ .x = -50.0, .y = 50.0, .z = 50.0},
+            .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+            30.0,
+            86.60,
+            5.0,
+            render_settings),
         .hittables = &.{
             .{
                 .sphere = .{ // center

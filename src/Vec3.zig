@@ -135,6 +135,20 @@ pub fn randomNormalized(rand: std.Random) Vec3 {
     }
 }
 
+pub fn randomInUnitDisk(rand: std.Random) Vec3 {
+    while (true) {
+        const p = Vec3 {
+            .x = rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = -1.0, .max = 1.0 }),
+            .y = rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = -1.0, .max = 1.0 }),
+            .z = 0.0,
+        };
+
+        if (p.squaredMagnitude() < 1.0) {
+            return p;
+        }
+    }
+}
+
 pub fn randomOnHemisphere(rand: std.Random, normal: Vec3) Vec3 {
     const rand_unit = randomNormalized(rand);
     if (dot(rand_unit, normal) > 0.0) {

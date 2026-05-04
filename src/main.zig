@@ -61,7 +61,8 @@ pub fn main(init: std.process.Init) !void {
     const mat_metal_2 = Material { .metal = .{ .albedo = .init(0.8, 0.6, 0.2), .fuzz = 0.25 } };
     const mat_metal_3 = Material { .metal = .{ .albedo = .init(0.0, 0.4, 0.65), .fuzz = 0.5} };
     const mat_metal_4 = Material { .metal = .{ .albedo = .init(0.35, 0.0, 0.65), .fuzz = 0.75 } };
-    const mat_metal_5 = Material { .metal = .{ .albedo = .init(0.65, 0.01, 0.0), .fuzz = 1.0 } };
+    const mat_glass_outer = Material { .dielectic = .{ .refractive_index = 1.5 } }; // outer glass sphere
+    const mat_glass_inner = Material { .dielectic = .{ .refractive_index = 1.0 / 1.5 } }; // inner air sphere
 
     const scene = Scene {
         .camera = Camera.init(
@@ -116,10 +117,17 @@ pub fn main(init: std.process.Init) !void {
                 }
             },
             .{
-                .sphere = .{ // metal5
+                .sphere = .{ // outer glass
                     .center =  .{ .x = 14.0, .y = 0.0, .z = 0.0 },
                     .radius = 3.0,
-                    .material = mat_metal_5
+                    .material = mat_glass_outer
+                }
+            },
+            .{
+                .sphere = .{ // inner glass
+                    .center =  .{ .x = 14.0, .y = 0.0, .z = 0.0 },
+                    .radius = 2.0,
+                    .material = mat_glass_inner
                 }
             },
         }

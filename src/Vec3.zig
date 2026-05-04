@@ -162,6 +162,19 @@ pub fn reflectOnUnit(v: Vec3, unit: Vec3) Vec3 {
     return v.add(unit.scalarMul(- 2.0 * proj));
 }
 
+/// Asserts that `v` and `n` are normalized.
+pub fn refract(unit_v: Vec3, n: Vec3, etai_over_etat: Float) Vec3 {
+    std.debug.assert(unit_v.isNormalized());
+    std.debug.assert(n.isNormalized());
+
+    const cos_theta = @min(-dot(unit_v, n), 1.0);
+
+    const r_out_perp = (unit_v.add(n.scalarMul(cos_theta))).scalarMul(etai_over_etat);
+    const r_out_parallel = n.scalarMul(-@sqrt(@abs(1.0 - r_out_perp.squaredMagnitude())));
+
+    return r_out_perp.add(r_out_parallel);
+}
+
 pub fn vectorDot(a: @Vector(3, Float), b: @Vector(3, Float)) Float {
     return @reduce(.Add, a * b);
 }
@@ -874,4 +887,53 @@ test "fromVector" {
     try std.testing.expect(isPositiveInf(b.x));
     try std.testing.expect(isNegativeInf(b.y));
     try std.testing.expect(isNan(b.z));
+}
+
+test "refract" {
+    const v = Vec3{ .x = std.math.sqrt1_2, .y = -std.math.sqrt1_2, .z = 0.0 };
+    const n = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
+
+    // Air (1.0) to Glass (1.5)
+    var etai_over_etat: Float = 1.0 / 1.5;
+    var r = refract(v, n, etai_over_etat);
+    var sin_theta_t: Float = @as(Float, std.math.sqrt1_2) * etai_over_etat;
+    try std.testing.expectApproxEqAbs(sin_theta_t, r.x, eps);
+    try std.testing.expectApproxEqAbs(-std.math.sqrt(1.0 - sin_theta_t * sin_theta_t), r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+
+    // Air (1.0) to Water (1.333)
+    etai_over_etat = 1.0 / 1.333;
+    r = refract(v, n, etai_over_etat);
+    sin_theta_t = @as(Float, std.math.sqrt1_2) * etai_over_etat;
+    try std.testing.expectApproxEqAbs(sin_theta_t, r.x, eps);
+    try std.testing.expectApproxEqAbs(-std.math.sqrt(1.0 - sin_theta_t * sin_theta_t), r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+
+    // Air (1.0) to Diamond (2.42)
+    etai_over_etat = 1.0 / 2.42;
+    r = refract(v, n, etai_over_etat);
+    sin_theta_t = @as(Float, std.math.sqrt1_2) * etai_over_etat;
+    try std.testing.expectApproxEqAbs(sin_theta_t, r.x, eps);
+    try std.testing.expectApproxEqAbs(-std.math.sqrt(1.0 - sin_theta_t * sin_theta_t), r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+
+    // Water (1.333) to Glass (1.5)
+    etai_over_etat = 1.333 / 1.5;
+    r = refract(v, n, etai_over_etat);
+    sin_theta_t = @as(Float, std.math.sqrt1_2) * etai_over_etat;
+    try std.testing.expectApproxEqAbs(sin_theta_t, r.x, eps);
+    try std.testing.expectApproxEqAbs(-std.math.sqrt(1.0 - sin_theta_t * sin_theta_t), r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
+
+    // Glass (1.5) to Air (1.0)
+    // For 45 degrees, angle is greater than critical angle. sin_theta_t = 1.5 * sqrt(2)/2 = 1.06 > 1.0
+    // Total internal reflection would occur in reality, but for test logic, let's test a valid angle like 30 degrees (sqrt(3)/2, -0.5, 0).
+    const v2 = Vec3{ .x = -0.5, .y = -std.math.sqrt(@as(Float, 3.0)) / 2.0, .z = 0.0 }; // 30 deg to normal
+    etai_over_etat = 1.5 / 1.0;
+    r = refract(v2, n, etai_over_etat);
+    sin_theta_t = -0.5 * etai_over_etat; // moving left
+    try std.testing.expectApproxEqAbs(sin_theta_t, r.x, eps);
+    // Use abs to avoid NaN on total internal reflection
+    try std.testing.expectApproxEqAbs(-std.math.sqrt(@abs(1.0 - sin_theta_t * sin_theta_t)), r.y, eps);
+    try std.testing.expectApproxEqAbs(0.0, r.z, eps);
 }

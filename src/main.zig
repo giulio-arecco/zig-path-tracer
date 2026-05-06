@@ -11,6 +11,7 @@ const Vec3 = @import("Vec3.zig");
 const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
+const Sphere = graphics.scene_3d.geometry.Sphere;
 const RenderSettings = rendering.RenderSettings;
 const RayTracer = raytracing.RayTracer;
 const ParallelRayTracer = raytracing.ParallelRayTracer;
@@ -51,8 +52,7 @@ pub fn main(init: std.process.Init) !void {
     const render_settings = RenderSettings {
             .image_width = IMG_WIDTH,
             .image_height = IMG_HEIGHT,
-            .ray_tmin = 0.001, // Avoid 0.0 to prevent shadow acne
-            .ray_tmax = std.math.inf(Float),
+            .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
             .max_ray_bounces = 50,
             .samples_per_pixel = 500,
             .pixel_samples_scale = 0.002, // 1/samples_per_pixel
@@ -118,22 +118,22 @@ pub fn main(init: std.process.Init) !void {
 fn generateScene(scene: *Scene, big_radius: Float, small_radius: Float) !void {
     const ground_material = Material { .lambertian = .{ .albedo = .init(0.5, 0.5, 0.5) } };
     const center_ground = Vec3 { .x = 0.0, .y = -1000.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .{ .center = center_ground, .radius = 1000, .material = ground_material } });
+    try scene.add(.{ .sphere = .init(center_ground, 1000, ground_material) });
 
     const material_1 = Material { .dielectic = .{ .refractive_index = 1.5 }};
     const center_1 = Vec3 { .x = 0.0, .y = 1.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .{ .center = center_1, .radius = 1.0, .material = material_1 } });
+    try scene.add(.{ .sphere = .init(center_1, 1.0, material_1) });
 
     const material_1_inside = Material { .dielectic = .{ .refractive_index = 1.0 / 1.5 }};
-    try scene.add(.{ .sphere = .{ .center = center_1, .radius = 0.5, .material = material_1_inside } });
+    try scene.add(.{ .sphere = .init(center_1, 0.5, material_1_inside) });
 
     const material_2 = Material { .lambertian = .{ .albedo = .init(0.4, 0.2, 0.1) } };
     const center_2 = Vec3 { .x = -4.0, .y = 1.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .{ .center = center_2, .radius = 1.0, .material = material_2 } });
+    try scene.add(.{ .sphere = .init(center_2, 1.0, material_2) });
 
     const material_3 = Material { .metal = .{ .albedo = .init(0.7, 0.6, 0.5), .fuzz = 0.0 }};
     const center_3 = Vec3 { .x = 4.0, .y = 1.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .{ .center = center_3, .radius = 1.0, .material = material_3 } });
+    try scene.add(.{ .sphere = .init(center_3, 1.0, material_3) });
 
     var prng: std.Random.DefaultPrng = .init(121);
     const rand = prng.random();
@@ -171,19 +171,19 @@ fn generateScene(scene: *Scene, big_radius: Float, small_radius: Float) !void {
                     // lambertian
                     const albedo = LinearColor.random(rand).mul(LinearColor.random(rand));
                     const lambertian = Material { .lambertian = .{ .albedo = albedo } };
-                    try scene.add(.{ .sphere = .{ .center = center, .radius = small_radius, .material = lambertian } });
+                    try scene.add(.{ .sphere = .init(center, small_radius, lambertian) });
                 }
                 else if (choose_mat < 0.85) {
                     // metal
                     const albedo = LinearColor.randomInRange(rand, 0.5, 1.0);
                     const fuzz = math_utils.rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0 }, .{ .min = 0.0, .max = 0.5});
                     const metal = Material { .metal = .{ .albedo = albedo, .fuzz = fuzz }};
-                    try scene.add(.{ .sphere = .{ .center = center, .radius = small_radius, .material = metal } });
+                    try scene.add(.{ .sphere = .init(center, small_radius, metal) });
                 }
                 else {
                     // glass
                     const dielectric = Material { .dielectic = .{ .refractive_index = 1.5 }};
-                    try scene.add(.{ .sphere = .{ .center = center, .radius = small_radius, .material = dielectric } });
+                    try scene.add(.{ .sphere = .init(center, small_radius, dielectric) });
                 }
             }
         }

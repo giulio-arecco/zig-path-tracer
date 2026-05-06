@@ -9,7 +9,7 @@ const Float = @import("../../config.zig").Float;
 const LinearColor = @import("../LinearColor.zig");
 const LinearGradient = LinearColor.LinearGradient;
 const HitRecord = @import("geometry.zig").HitRecord;
-const Interval = math_utils.Interval;
+const Interval = math_utils.Interval(Float);
 
 const normalizeFloat = math_utils.normalizeFloat;
 
@@ -20,18 +20,18 @@ pub fn at(self: Ray, t: Float) Vec3 {
     return self.origin.add(self.dir.scalarMul(t));
 }
 
-pub fn rayColorVec3(ray: Ray, scene: Scene, ray_tmin: Float, ray_tmax: Float, depth: u16, rand: std.Random) LinearColor {
+pub fn rayColor(ray: Ray, scene: Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
     if (depth <= 0) {
         return LinearColor.black;
     }
 
-    const hit = scene.hit(ray, ray_tmin, ray_tmax);
+    const hit = scene.hit(ray, ray_t_range);
 
     if (hit) |record| {
         const res = record.material.scatter(ray, record, rand);
 
         if (res.scattered_ray) |scattered_ray| {
-            return rayColorVec3(scattered_ray, scene, ray_tmin, ray_tmax, depth - 1, rand).mul(res.attenuation);
+            return rayColor(scattered_ray, scene, ray_t_range, depth - 1, rand).mul(res.attenuation);
         }
 
         return LinearColor.black;

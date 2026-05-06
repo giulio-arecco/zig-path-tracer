@@ -10,7 +10,7 @@ const Vec3 = @import("../../../Vec3.zig");
 const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
-const rayColorVec3 = Ray.rayColorVec3;
+const rayColorVec3 = Ray.rayColor;
 
 pub const RayTracer = struct {
     settings: RenderSettings,
@@ -96,8 +96,7 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
     const camera = scene.camera;
     const samples_per_pixel = settings.samples_per_pixel;
     const pixel_samples_scale = settings.pixel_samples_scale;
-    const ray_tmin = settings.ray_tmin;
-    const ray_tmax = settings.ray_tmax;
+    const ray_t_range = settings.ray_t_range;
     const max_depth = settings.max_ray_bounces;
 
     var pixel_color_sum = LinearColor.black;
@@ -106,7 +105,7 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
         const ray = if (sample == 0) camera.getRay(random, x_screen, y_screen, true)
             else camera.getRay(random, x_screen, y_screen, false);
 
-        pixel_color_sum = pixel_color_sum.add(rayColorVec3(ray, scene, ray_tmin, ray_tmax, max_depth, random));
+        pixel_color_sum = pixel_color_sum.add(rayColorVec3(ray, scene, ray_t_range, max_depth, random));
     }
 
     const pixel_color = blk: {

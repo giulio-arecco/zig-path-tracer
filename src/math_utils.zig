@@ -188,6 +188,23 @@ pub fn Interval(comptime T: type) type {
         pub fn rescaleValue(self: Self, x: T, x_range: Interval(T)) T {
             return x_range.min + (x_range.max - x_range.min) * ((x - self.min) / (self.max - self.min));
         }
+
+        pub fn expand(self: Self, delta: T) Self {
+            const padding = @divTrunc(delta, 2);
+
+            return .{
+                .min = self.min - padding,
+                .max = self.max + padding
+            };
+        }
+
+        /// Create the interval tightly enclosing the two input intervals
+        pub fn initEncloseTwo(a: Self, b: Self) Self {
+            return .{
+                .min = if (a.min <= b.min) a.min else b.min,
+                .max = if (a.max >= b.max) a.max else b.max
+            };
+        }
     };
 }
 
@@ -397,5 +414,35 @@ test "rescaleFloat" {
 
     const old_range_pos = IntervalF32{ .min = 10.0, .max = 20.0 };
     try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, 15.0, old_range_pos, new_range), floatEps(f32));
+}
+
+test "Interval.expand" {
+    const IntervalF32 = Interval(f32);
+    const intvlF = IntervalF32{ .min = 1.0, .max = 5.0 };
+    const expandedF = intvlF.expand(2.0);
+    try std.testing.expectApproxEqAbs(0.0, expandedF.min, floatEps(f32));
+    try std.testing.expectApproxEqAbs(6.0, expandedF.max, floatEps(f32));
+
+    const IntervalI32 = Interval(i32);
+    const intvlI = IntervalI32{ .min = -2, .max = 4 };
+    const expandedI = intvlI.expand(2);
+    try std.testing.expectEqual(@as(i32, -3), expandedI.min);
+    try std.testing.expectEqual(@as(i32, 5), expandedI.max);
+}
+
+test "Interval.initEncloseTwo" {
+    const IntervalF32 = Interval(f32);
+    const aF = IntervalF32{ .min = 1.0, .max = 5.0 };
+    const bF = IntervalF32{ .min = 3.0, .max = 7.0 };
+    const enclosedF = IntervalF32.initEncloseTwo(aF, bF);
+    try std.testing.expectApproxEqAbs(1.0, enclosedF.min, floatEps(f32));
+    try std.testing.expectApproxEqAbs(7.0, enclosedF.max, floatEps(f32));
+
+    const IntervalI32 = Interval(i32);
+    const aI = IntervalI32{ .min = -2, .max = 3 };
+    const bI = IntervalI32{ .min = -5, .max = 0 };
+    const enclosedI = IntervalI32.initEncloseTwo(aI, bI);
+    try std.testing.expectEqual(@as(i32, -5), enclosedI.min);
+    try std.testing.expectEqual(@as(i32, 3), enclosedI.max);
 }
 

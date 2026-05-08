@@ -10,13 +10,13 @@ const Vec3 = @import("../../../Vec3.zig");
 const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
-const rayColorVec3 = Ray.rayColor;
+const rayColor = Ray.rayColor;
 
 pub const RayTracer = struct {
     settings: RenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: RayTracer, scene: Scene, out: []u8) void {
+    pub fn render(self: RayTracer, scene: *const Scene, out: []u8) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
@@ -46,7 +46,7 @@ pub const ParallelRayTracer = struct {
     settings: RenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: ParallelRayTracer, scene: Scene, out: []u8) !void {
+    pub fn render(self: ParallelRayTracer, scene: *const Scene, out: []u8) !void {
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
 
@@ -75,7 +75,7 @@ pub const ParallelRayTracer = struct {
         try group.await(self.io);
     }
 
-    fn renderRow(self: ParallelRayTracer, scene: Scene, y_screen: usize, row: []u8, progress_node: ?std.Progress.Node) void {
+    fn renderRow(self: ParallelRayTracer, scene: *const Scene, y_screen: usize, row: []u8, progress_node: ?std.Progress.Node) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
 
@@ -92,7 +92,7 @@ pub const ParallelRayTracer = struct {
     }
 };
 
-fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_screen: usize, y_screen: usize, out: *[3]u8) void {
+fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out: *[3]u8) void {
     const camera = scene.camera;
     const samples_per_pixel = settings.samples_per_pixel;
     const pixel_samples_scale = settings.pixel_samples_scale;
@@ -105,7 +105,7 @@ fn colorPixel(settings: RenderSettings, scene: Scene, random: std.Random, x_scre
         const ray = if (sample == 0) camera.getRay(random, x_screen, y_screen, true)
             else camera.getRay(random, x_screen, y_screen, false);
 
-        pixel_color_sum = pixel_color_sum.add(rayColorVec3(ray, scene, ray_t_range, max_depth, random));
+        pixel_color_sum = pixel_color_sum.add(rayColor(ray, scene, ray_t_range, max_depth, random));
     }
 
     const pixel_color = blk: {

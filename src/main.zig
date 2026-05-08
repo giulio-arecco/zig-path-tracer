@@ -93,24 +93,38 @@ pub fn main(init: std.process.Init) !void {
     time_start = std.Io.Clock.awake.now(init.io);
     // serial_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
     time_end = std.Io.Clock.awake.now(init.io);
-
     const serial_duration = time_start.durationTo(time_end).toNanoseconds();
 
     time_start = std.Io.Clock.awake.now(init.io);
-    try parallel_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
+    try parallel_raytracer.render(&scene, memory_map.memory[PPM_HEADER_LEN..]);
+    time_end = std.Io.Clock.awake.now(init.io);
+    const parallel_duration = time_start.durationTo(time_end).toNanoseconds();
+
+    try scene.buildBvh(4);
+
+    time_start = std.Io.Clock.awake.now(init.io);
+    try parallel_raytracer.render(&scene, memory_map.memory[PPM_HEADER_LEN..]);
     time_end = std.Io.Clock.awake.now(init.io);
 
-    const parallel_duration = time_start.durationTo(time_end).toNanoseconds();
+    const parallel_bvh_duration = time_start.durationTo(time_end).toNanoseconds();
 
     print(
         \\
         \\ ====== EXECUTION TIME COMPARISON ======
         \\ Serial Execution: {} ms.
         \\ Parallel Execution: {} ms.
-        \\ Speedup: {d:.2}.
+        \\ Parallel with BVH Execution: {} ms.
+        \\ Serial/Parallel Speedup: {d:.2}.
+        \\ Parallel/Parallel with BVH Speedup: {d:.2}.
         \\ =======================================
         \\
-    , .{ @divTrunc(serial_duration, std.time.ns_per_ms), @divTrunc(parallel_duration, std.time.ns_per_ms), @as(f128, @floatFromInt(serial_duration)) / @as(f128, @floatFromInt(parallel_duration))});
+    , .{
+        @divTrunc(serial_duration, std.time.ns_per_ms),
+        @divTrunc(parallel_duration, std.time.ns_per_ms),
+        @divTrunc(parallel_bvh_duration, std.time.ns_per_ms),
+        @as(f128, @floatFromInt(serial_duration)) / @as(f128, @floatFromInt(parallel_duration)),
+        @as(f128, @floatFromInt(parallel_duration)) / @as(f128, @floatFromInt(parallel_bvh_duration))
+    });
 
     try memory_map.write(init.io);
 }

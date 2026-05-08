@@ -173,6 +173,14 @@ pub fn Interval(comptime T: type) type {
         min: T,
         max: T,
 
+        /// Create the interval tightly enclosing the two input intervals
+        pub fn initEncloseTwo(a: Self, b: Self) Self {
+            return .{
+                .min = if (a.min <= b.min) a.min else b.min,
+                .max = if (a.max >= b.max) a.max else b.max
+            };
+        }
+
         pub fn size(self: Self) T {
             return self.max - self.min;
         }
@@ -195,14 +203,6 @@ pub fn Interval(comptime T: type) type {
             return .{
                 .min = self.min - padding,
                 .max = self.max + padding
-            };
-        }
-
-        /// Create the interval tightly enclosing the two input intervals
-        pub fn initEncloseTwo(a: Self, b: Self) Self {
-            return .{
-                .min = if (a.min <= b.min) a.min else b.min,
-                .max = if (a.max >= b.max) a.max else b.max
             };
         }
     };

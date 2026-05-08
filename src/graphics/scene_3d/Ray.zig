@@ -20,15 +20,16 @@ pub fn at(self: Ray, t: Float) Vec3 {
     return self.origin.add(self.dir.scalarMul(t));
 }
 
-pub fn rayColor(ray: Ray, scene: Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
+pub fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
     if (depth <= 0) {
         return LinearColor.black;
     }
 
-    const hit = scene.hit(ray, ray_t_range);
+    var hit_record: HitRecord = undefined;
+    const hit = scene.hit(ray, ray_t_range, &hit_record);
 
-    if (hit) |record| {
-        const res = record.material.scatter(ray, record, rand);
+    if (hit) {
+        const res = hit_record.material.scatter(ray, hit_record, rand);
 
         if (res.scattered_ray) |scattered_ray| {
             return rayColor(scattered_ray, scene, ray_t_range, depth - 1, rand).mul(res.attenuation);

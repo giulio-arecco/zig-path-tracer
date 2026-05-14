@@ -1,16 +1,16 @@
 const std = @import("std");
 const config = @import("../../../config.zig");
 const geometry = @import("../geometry.zig");
+const math_utils = @import("../../../math_utils.zig");
 
 const RenderSettings = @import("RenderSettings.zig");
 const Scene = @import("../Scene.zig");
 const Ray = @import("../Ray.zig");
 const LinearColor = @import("../../LinearColor.zig");
 const Vec3 = @import("../../../Vec3.zig");
+const Interval = math_utils.Interval(Float);
 const Float = config.Float;
 const HitRecord = geometry.HitRecord;
-
-const rayColor = Ray.rayColor;
 
 pub const RayTracer = struct {
     settings: RenderSettings,
@@ -115,4 +115,32 @@ fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random,
     };
 
     std.mem.writeInt(u24, out, pixel_color.toPacked(), .big);
+}
+
+fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
+    if (depth <= 0) {
+        return LinearColor.black;
+    }
+
+    var hit_record: HitRecord = undefined;
+    const hit = scene.hit(ray, ray_t_range, &hit_record);
+
+    if (!hit) {
+        return scene.bg_color;
+
+        // const grad = LinearGradient {
+        //     .start_color = LinearColor.white,
+        //     .end_color = LinearColor.init(0.25, 0.5, 1.0)
+        // };
+
+        // const normalized_dir = ray.dir.normalized();
+        // return grad.at(0.5 * (normalized_dir.y + 1.0));
+    }
+
+    const res = hit_record.material.scatter(ray, hit_record, rand);
+    if (res.scattered_ray) |scattered_ray| {
+        return rayColor(scattered_ray, scene, ray_t_range, depth - 1, rand).mul(res.attenuation);
+    }
+
+    return LinearColor.black;
 }

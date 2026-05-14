@@ -13,6 +13,7 @@ const LinearColor = @import("../LinearColor.zig");
 const Allocator = std.mem.Allocator;
 
 const dot = Vec3.dot;
+const cross = Vec3.cross;
 const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
 
 
@@ -61,9 +62,9 @@ pub const Sphere = struct {
 
         // Find the nearest root that lies in the acceptable range
         var root = (h - discr_sqrt) / a; // Remember, we use h and not -h in the reduced formula because it's defined as -b/2.0, so b = -2.0*h
-        if (root <= ray_t_range.min or root >= ray_t_range.max) {
+        if (!ray_t_range.contains(root)) {
             root = (h + discr_sqrt) / a;
-            if (root <= ray_t_range.min or root >= ray_t_range.max) {
+            if (!ray_t_range.contains(root)) {
                 return false;
             }
         }
@@ -75,6 +76,93 @@ pub const Sphere = struct {
 
         hit_record.* = .{
             .t = root,
+            .point = point,
+            .normal = normal,
+            .material = self.material,
+            .front_face = front_face
+        };
+        return true;
+    }
+};
+
+pub const Quad = struct {
+    /// The quad starting corner.\
+    /// Treat as **immutable**
+    q: Vec3,
+    /// The quad first side. Q + u gives one of the two corners adjecent to Q.\
+    /// Treat as **immutable**.
+    u: Vec3,
+    /// The quad second side. Q + v gives one of the two corners adjecent to Q.\
+    /// Treat as **immutable**.
+    v: Vec3,
+    /// A constant vector for the given quad, useful for constructing a *coordinate frame* for the plane
+    /// containing the quad to find the ray-quad intersection point planar coordinates.\
+    /// It's equal to **n** / (**n** ⋅ **n**), where **n** is the quad normal vector (before normalization).\
+    /// Treat as **immutable**,
+    w: Vec3,
+    /// The quad unit normal vector, computed as the cross product between u and v (u x v).\
+    /// Treat as **immutable**.
+    normal: Vec3,
+    /// The `D` term in the implicit formula for the plane containing the quad: Ax + By + Cz + D = 0.\
+    /// Treat as **immutable**.
+    d: Float,
+    /// The quad material.\
+    /// Treat as **immutable**.
+    material: Material,
+    /// The quad axis-aligned bounding box.\
+    /// Treat as **immutable**.
+    bbox: Aabb,
+
+    pub fn init(q: Vec3, u: Vec3, v: Vec3, mat: Material) Quad {
+        const box0 = Aabb.initFromPoints(q, q.add(u).add(v));
+        const box1 = Aabb.initFromPoints(q.add(u), q.add(v));
+        const aabb = Aabb.initMergeTwo(box0, box1);
+
+        const n = cross(u, v);
+        const normal = n.normalized();
+        const d = dot(normal, q);
+        const w = n.scalarDiv(n.squaredMagnitude());
+
+        return .{
+            .q = q,
+            .u = u,
+            .v = v,
+            .w = w,
+            .normal = normal,
+            .d = d,
+            .material = mat,
+            .bbox = aabb
+        };
+    }
+
+    pub fn hit(self: Quad, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
+        const denom = dot(self.normal, ray.dir);
+        if (@abs(denom) < std.math.floatEps(Float)) {
+            // The ray is parallel to the quad
+            return false;
+        }
+
+        // Ray-plane intersection
+        const t = (self.d - dot(self.normal, ray.origin)) / denom;
+        if (!ray_t_range.contains(t)) {
+            return false;
+        }
+
+        const point = ray.at(t);
+
+        const planar_hit_vec = point.sub(self.q);
+        const alpha = dot(self.w, cross(planar_hit_vec, self.v));
+        const beta = dot(self.w, cross(self.u, planar_hit_vec));
+        const unit_interval = IntervalFloat {.min = 0.0, .max = 1.0 };
+        // Check if the ray-plane intersection point lies inside the quad
+        if (!unit_interval.contains(alpha) or !unit_interval.contains(beta)) {
+            return false;
+        }
+
+        const front_face, const normal = HitRecord.determineNormalOrientation(ray, self.normal);
+
+        hit_record.* = .{
+            .t = t,
             .point = point,
             .normal = normal,
             .material = self.material,
@@ -107,6 +195,7 @@ pub const HitRecord = struct {
 
 pub const Hittable = union(enum) {
     sphere: Sphere,
+    quad: Quad,
 
     pub fn hit(self: Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         switch (self) {
@@ -122,24 +211,36 @@ pub const Hittable = union(enum) {
 };
 
 pub const Aabb = struct {
+    /// The axis-aligned bounding box x interval.\
+    /// Treat as **immutable**.
     x: IntervalFloat,
+    /// The axis-aligned bounding box y interval.\
+    /// Treat as **immutable**.
     y: IntervalFloat,
+    /// The axis-aligned bounding box z interval.\
+    /// Treat as **immutable**.
     z: IntervalFloat,
 
     pub fn initFromPoints(a: Vec3, b: Vec3) Aabb {
-        return .{
+        var box = Aabb {
             .x = if (a.x <= b.x) .{ .min = a.x, .max = b.x } else .{ .min = b.x, .max = a.x },
             .y = if (a.y <= b.y) .{ .min = a.y, .max = b.y } else .{ .min = b.y, .max = a.y },
             .z = if (a.z <= b.z) .{ .min = a.z, .max = b.z } else .{ .min = b.z, .max = a.z },
         };
+
+        box.padToMinimums(0.0001);
+        return box;
     }
 
     pub fn initMergeTwo(box0: Aabb, box1: Aabb) Aabb {
-        return .{
+        var box = Aabb {
             .x = IntervalFloat.initEncloseTwo(box0.x, box1.x),
             .y = IntervalFloat.initEncloseTwo(box0.y, box1.y),
             .z = IntervalFloat.initEncloseTwo(box0.z, box1.z)
         };
+
+        box.padToMinimums(0.0001);
+        return box;
     }
 
     /// Returns the index of the longest axis of the bounding box.\
@@ -191,6 +292,13 @@ pub const Aabb = struct {
         }
 
         return res_t_range;
+    }
+
+    /// Adjust the AABB so taht no side is narrower than the passed delta value, if necessary.
+    fn padToMinimums(self: *Aabb, delta: Float) void {
+        if (self.x.size() < delta) self.x = self.x.expand(delta);
+        if (self.y.size() < delta) self.y = self.y.expand(delta);
+        if (self.z.size() < delta) self.z = self.z.expand(delta);
     }
 };
 
@@ -384,43 +492,6 @@ pub const BvhTree = struct {
 
         return node_idx;
     }
-
-    // fn hitNode(self: BvhTree, node_idx: usize, hittables: []Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
-    //     const node = self.nodes.items[node_idx];
-    //     const hit_bbox = node.bbox.hit(ray, ray_t_range);
-
-    //     if (hit_bbox == null) {
-    //         return false;
-    //     }
-
-    //     const bbox_t_range = hit_bbox.?;
-
-    //     if (node.primitive_count > 0) {
-    //         // leaf
-    //         var closest_t = bbox_t_range.max;
-    //         var hit_anything = false;
-    //         const start = node.first_or_right_index;
-    //         const end = start + node.primitive_count;
-
-    //         for (hittables[start..end]) |hittable| {
-    //             if (hittable.hit(ray, .{ .min = bbox_t_range.min, .max = closest_t }, hit_record)) {
-    //                 closest_t = hit_record.t;
-    //                 hit_anything = true;
-    //             }
-    //         }
-
-    //         return hit_anything;
-    //     }
-
-    //     // inner node
-    //     const hit_left = hitNode(self, node_idx + 1, hittables, ray, bbox_t_range, hit_record);
-    //     const hit_right = hitNode(self, node.first_or_right_index, hittables, ray, .{
-    //         .min = bbox_t_range.min,
-    //         .max = if (hit_left) hit_record.t else bbox_t_range.max
-    //     },  hit_record);
-
-    //     return hit_left or hit_right;
-    // }
 };
 
 const absEps = std.math.floatEps(Float);
@@ -525,6 +596,85 @@ test "Sphere.hit - hit outside range" {
 
     var h: HitRecord = undefined;
     const hit = sphere.hit(ray, ray_t_range, &h);
+    try testing.expect(!hit);
+}
+
+test "Quad.init" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const q = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
+    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const quad = Quad.init(q, u, v, test_material);
+
+    try testing.expectApproxEqAbs(0.0, quad.q.x, absEps);
+    try testing.expectApproxEqAbs(2.0, quad.u.x, absEps);
+    try testing.expectApproxEqAbs(2.0, quad.v.y, absEps);
+
+    // Normal should be Z-axis
+    try testing.expectApproxEqAbs(0.0, quad.normal.x, absEps);
+    try testing.expectApproxEqAbs(0.0, quad.normal.y, absEps);
+    try testing.expectApproxEqRel(@as(Float, 1.0), quad.normal.z, relEps);
+
+    // D = dot(normal, q) = 0
+    try testing.expectApproxEqAbs(0.0, quad.d, absEps);
+}
+
+test "Quad.hit - ray hits quad" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const q = Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 };
+    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
+    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const quad = Quad.init(q, u, v, test_material);
+
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = quad.hit(ray, ray_t_range, &h);
+    try testing.expect(hit);
+
+    if (hit) {
+        try testing.expectApproxEqRel(@as(Float, 5.0), h.t, relEps);
+        try testing.expect(h.front_face);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.y, absEps);
+        try testing.expectApproxEqRel(@as(Float, 1.0), h.normal.z, relEps);
+
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.y, absEps);
+        try testing.expectApproxEqRel(@as(Float, -5.0), h.point.z, relEps);
+    }
+}
+
+test "Quad.hit - ray misses quad" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const q = Vec3{ .x = 2.0, .y = 2.0, .z = -5.0 };
+    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
+    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const quad = Quad.init(q, u, v, test_material);
+
+    // Ray goes straight down Z through origin, quad is shifted to x,y > 2
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = quad.hit(ray, ray_t_range, &h);
+    try testing.expect(!hit);
+}
+
+test "Quad.hit - ray parallel to quad" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const q = Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 };
+    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
+    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const quad = Quad.init(q, u, v, test_material);
+
+    // Ray is parallel to the quad (moves along X axis)
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = -2.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = quad.hit(ray, ray_t_range, &h);
     try testing.expect(!hit);
 }
 
@@ -744,4 +894,23 @@ test "BvhTree.hit - outside range" {
     var h: HitRecord = undefined;
     const hit = bvh.hit(&hittables, ray, ray_t_range, &h);
     try testing.expect(!hit);
+}
+
+test "Aabb.padToMinimums" {
+    var bbox = Aabb{
+        .x = IntervalFloat{ .min = 0.0, .max = 0.05 },
+        .y = IntervalFloat{ .min = 0.0, .max = 0.2 },
+        .z = IntervalFloat{ .min = 0.0, .max = 0.05 },
+    };
+
+    bbox.padToMinimums(0.1);
+
+    try testing.expectApproxEqAbs(@as(Float, -0.05), bbox.x.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 0.1), bbox.x.max, absEps);
+
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.y.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 0.2), bbox.y.max, absEps);
+
+    try testing.expectApproxEqAbs(@as(Float, -0.05), bbox.z.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 0.1), bbox.z.max, absEps);
 }

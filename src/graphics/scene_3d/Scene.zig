@@ -6,6 +6,7 @@ const config = @import("../../config.zig");
 const math_utils = @import("../../math_utils.zig");
 
 const Ray = @import("Ray.zig");
+const LinearColor = @import("../LinearColor.zig");
 const HitRecord = geometry.HitRecord;
 const Float = config.Float;
 const Interval = math_utils.Interval(Float);
@@ -16,12 +17,13 @@ const Allocator = std.mem.Allocator;
 const Camera = @import("Camera.zig");
 const Hittable = geometry.Hittable;
 
-/// The scene main camera.\
-/// Treat as **immutable**.
+/// The scene main camera.
 camera: Camera,
 /// The collection of all hittable objects in scene.\
 /// Treat as **immutable**.
 hittables: std.ArrayList(Hittable),
+/// The scene background color.
+bg_color: LinearColor,
 /// The scene bounding volume hierarchy, initialized as `null` and built on request from the current primitives list.\
 /// Treat as **immutable**.
 bvh: ?BvhTree,
@@ -52,20 +54,22 @@ pub fn hit(self: *const Scene, ray: Ray, ray_t_range: Interval, hit_record: *Hit
     return hit_anything;
 }
 
-pub fn init(camera: Camera, allocator: Allocator) Scene {
+pub fn init(camera: Camera, bg_color: LinearColor, allocator: Allocator) Scene {
     return .{
         .camera = camera,
         .hittables = .empty,
+        .bg_color = bg_color,
         .bvh = null,
         // .bbox = null,
         .allocator = allocator
     };
 }
 
-pub fn initWithCapacity(camera: Camera, allocator: Allocator, capacity: usize) Allocator.Error!Scene {
+pub fn initWithCapacity(camera: Camera, bg_color: LinearColor, allocator: Allocator, capacity: usize) Allocator.Error!Scene {
     return .{
         .camera = camera,
         .hittables = try .initCapacity(allocator, capacity),
+        .bg_color = bg_color,
         .bvh = null,
         // .bbox = null,
         .allocator = allocator

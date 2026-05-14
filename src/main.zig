@@ -12,6 +12,7 @@ const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Sphere = graphics.scene_3d.geometry.Sphere;
+const Quad = graphics.scene_3d.geometry.Quad;
 const RenderSettings = rendering.RenderSettings;
 const RayTracer = raytracing.RayTracer;
 const ParallelRayTracer = raytracing.ParallelRayTracer;
@@ -23,8 +24,8 @@ const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
 const computePathStrLen = fs_utils.computePathStrLen;
 
-const IMG_WIDTH = 1200;
-const IMG_HEIGHT= 675;
+const IMG_WIDTH = 400;
+const IMG_HEIGHT= 400;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
@@ -38,9 +39,6 @@ pub fn main(init: std.process.Init) !void {
     const file = try createImgFile(init.io, cwd, FILE_PATH);
     defer file.close(init.io);
 
-    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(init.io, .{}) else null;
-    defer if (root_node) |n| n.end();
-
     var memory_map = blk: {
         try file.setLength(init.io, PPM_HEADER_LEN + IMG_HEIGHT * IMG_WIDTH * 3);
         const stat = try file.stat(init.io);
@@ -49,13 +47,23 @@ pub fn main(init: std.process.Init) !void {
     };
     defer memory_map.destroy(init.io);
 
+    // try initAndRenderSpheresScene(init.io, init.arena.allocator(), memory_map.memory);
+    try initAndRenderQuadsScene(init.io, init.arena.allocator(), memory_map.memory);
+
+    try memory_map.write(init.io);
+}
+
+fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
+    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Spheres Scene" }) else null;
+    defer if (root_node) |n| n.end();
+
     const render_settings = RenderSettings {
-            .image_width = IMG_WIDTH,
-            .image_height = IMG_HEIGHT,
-            .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
-            .max_ray_bounces = 50,
-            .samples_per_pixel = 500,
-            .pixel_samples_scale = 0.002, // 1/samples_per_pixel
+        .image_width = IMG_WIDTH,
+        .image_height = IMG_HEIGHT,
+        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
+        .max_ray_bounces = 50,
+        .samples_per_pixel = 500,
+        .pixel_samples_scale = 0.002, // 1/samples_per_pixel
     };
 
     const camera = Camera.initLookAt(
@@ -65,71 +73,12 @@ pub fn main(init: std.process.Init) !void {
         10.0,
         0.6,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, init.arena.allocator(), 256);
+    var scene = try Scene.initWithCapacity(camera, LinearColor.white, gpa, 256);
     defer scene.deinit();
 
-    try generateScene(&scene, 1.0, 0.2);
+    const big_radius: Float = 1.0;
+    const small_radius: Float = 0.2;
 
-    // const serial_raytracer = RayTracer {
-    //     .settings = render_settings,
-    //     .progress_root_node = root_node
-    // };
-
-    var threaded = std.Io.Threaded.init(init.gpa, .{});
-    defer threaded.deinit();
-    const parallel_raytracer = ParallelRayTracer {
-        .settings = render_settings,
-        .io = threaded.io(),
-        .progress_root_node = root_node
-    };
-
-    var buf_writer = std.Io.Writer.fixed(memory_map.memory[0..PPM_HEADER_LEN]);
-    const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-
-    var time_start: std.Io.Timestamp = undefined;
-    var time_end: std.Io.Timestamp = undefined;
-
-    time_start = std.Io.Clock.awake.now(init.io);
-    // serial_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
-    time_end = std.Io.Clock.awake.now(init.io);
-    const serial_duration = time_start.durationTo(time_end).toNanoseconds();
-
-    time_start = std.Io.Clock.awake.now(init.io);
-    try parallel_raytracer.render(&scene, memory_map.memory[PPM_HEADER_LEN..]);
-    time_end = std.Io.Clock.awake.now(init.io);
-    const parallel_duration = time_start.durationTo(time_end).toNanoseconds();
-
-    try scene.buildBvh(4);
-
-    time_start = std.Io.Clock.awake.now(init.io);
-    try parallel_raytracer.render(&scene, memory_map.memory[PPM_HEADER_LEN..]);
-    time_end = std.Io.Clock.awake.now(init.io);
-
-    const parallel_bvh_duration = time_start.durationTo(time_end).toNanoseconds();
-
-    print(
-        \\
-        \\ ====== EXECUTION TIME COMPARISON ======
-        \\ Serial Execution: {} ms.
-        \\ Parallel Execution: {} ms.
-        \\ Parallel with BVH Execution: {} ms.
-        \\ Serial/Parallel Speedup: {d:.2}.
-        \\ Parallel/Parallel with BVH Speedup: {d:.2}.
-        \\ =======================================
-        \\
-    , .{
-        @divTrunc(serial_duration, std.time.ns_per_ms),
-        @divTrunc(parallel_duration, std.time.ns_per_ms),
-        @divTrunc(parallel_bvh_duration, std.time.ns_per_ms),
-        @as(f128, @floatFromInt(serial_duration)) / @as(f128, @floatFromInt(parallel_duration)),
-        @as(f128, @floatFromInt(parallel_duration)) / @as(f128, @floatFromInt(parallel_bvh_duration))
-    });
-
-    try memory_map.write(init.io);
-}
-
-fn generateScene(scene: *Scene, big_radius: Float, small_radius: Float) !void {
     const ground_material = Material { .lambertian = .{ .albedo = .init(0.5, 0.5, 0.5) } };
     const center_ground = Vec3 { .x = 0.0, .y = -1000.0, .z = 0.0 };
     try scene.add(.{ .sphere = .init(center_ground, 1000, ground_material) });
@@ -202,6 +151,142 @@ fn generateScene(scene: *Scene, big_radius: Float, small_radius: Float) !void {
             }
         }
     }
+
+    // const serial_raytracer = RayTracer {
+    //     .settings = render_settings,
+    //     .progress_root_node = root_node
+    // };
+
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const parallel_raytracer = ParallelRayTracer {
+        .settings = render_settings,
+        .io = threaded.io(),
+        .progress_root_node = root_node
+    };
+
+    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
+    const writer = &buf_writer;
+    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
+
+    var time_start: std.Io.Timestamp = undefined;
+    var time_end: std.Io.Timestamp = undefined;
+
+    time_start = std.Io.Clock.awake.now(io);
+    // serial_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
+    time_end = std.Io.Clock.awake.now(io);
+    const serial_duration = time_start.durationTo(time_end).toNanoseconds();
+
+    time_start = std.Io.Clock.awake.now(io);
+    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
+    time_end = std.Io.Clock.awake.now(io);
+    const parallel_duration = time_start.durationTo(time_end).toNanoseconds();
+
+    try scene.buildBvh(4);
+
+    time_start = std.Io.Clock.awake.now(io);
+    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
+    time_end = std.Io.Clock.awake.now(io);
+
+    const parallel_bvh_duration = time_start.durationTo(time_end).toNanoseconds();
+
+    print(
+        \\
+        \\ ====== EXECUTION TIME COMPARISON ======
+        \\ Serial Execution: {} ms.
+        \\ Parallel Execution: {} ms.
+        \\ Parallel with BVH Execution: {} ms.
+        \\ Serial/Parallel Speedup: {d:.2}.
+        \\ Parallel/Parallel with BVH Speedup: {d:.2}.
+        \\ =======================================
+        \\
+    , .{
+        @divTrunc(serial_duration, std.time.ns_per_ms),
+        @divTrunc(parallel_duration, std.time.ns_per_ms),
+        @divTrunc(parallel_bvh_duration, std.time.ns_per_ms),
+        @as(f128, @floatFromInt(serial_duration)) / @as(f128, @floatFromInt(parallel_duration)),
+        @as(f128, @floatFromInt(parallel_duration)) / @as(f128, @floatFromInt(parallel_bvh_duration))
+    });
+}
+
+fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
+    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Quads scene" }) else null;
+    defer if (root_node) |n| n.end();
+
+    const render_settings = RenderSettings {
+        .image_width = IMG_WIDTH,
+        .image_height = IMG_HEIGHT,
+        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
+        .max_ray_bounces = 50,
+        .samples_per_pixel = 100,
+        .pixel_samples_scale = 0.01, // 1/samples_per_pixel
+    };
+
+    const camera = Camera.initLookAt(
+        .{ .x = 0.0, .y = 0.0, .z = 9.0},
+        .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+        80.0,
+        10.0,
+        0.0,
+        render_settings);
+    var scene = try Scene.initWithCapacity(camera, LinearColor.white, gpa, 256);
+    defer scene.deinit();
+
+    // Materials
+    const left_red     = Material { .lambertian = .{ .albedo = LinearColor.init(1.0, 0.2, 0.2) } };
+    const back_green   = Material { .lambertian = .{ .albedo = LinearColor.init(0.2, 1.0, 0.2) } };
+    const right_blue   = Material { .lambertian = .{ .albedo = LinearColor.init(0.2, 0.2, 1.0) } };
+    const upper_orange = Material { .lambertian = .{ .albedo = LinearColor.init(1.0, 0.5, 0.0) } };
+    const lower_teal   = Material { .lambertian = .{ .albedo = LinearColor.init(0.2, 0.8, 0.8) } };
+
+    // Quads
+    try scene.add(.{ .quad = Quad.init(
+        .{ .x = -3.0, .y = -2.0, .z = 5.0 },
+        .{ .x = 0.0, .y = 0.0, .z = -4.0 },
+        .{ .x = 0.0, .y = 4.0, .z = 0.0 },
+        left_red
+    )});
+    try scene.add(.{ .quad = Quad.init(
+        .{ .x = -2.0, .y = -2.0, .z = 0.0 },
+        .{ .x = 4.0, .y = 0.0, .z = -0.0 },
+        .{ .x = 0.0, .y = 4.0, .z = 0.0 },
+        back_green
+    )});
+    try scene.add(.{ .quad = Quad.init(
+        .{ .x = 3.0, .y = -2.0, .z = 1.0 },
+        .{ .x = 0.0, .y = 0.0, .z = 4.0 },
+        .{ .x = 0.0, .y = 4.0, .z = 0.0 },
+        right_blue
+    )});
+    try scene.add(.{ .quad = Quad.init(
+        .{ .x = -2.0, .y = 3.0, .z = 1.0 },
+        .{ .x = 4.0, .y = 0.0, .z = 0.0 },
+        .{ .x = 0.0, .y = 0.0, .z = 4.0 },
+        upper_orange
+    )});
+    try scene.add(.{ .quad = Quad.init(
+        .{ .x = -2.0, .y = -3.0, .z = 5.0 },
+        .{ .x = 4.0, .y = 0.0, .z = 0.0 },
+        .{ .x = 0.0, .y = 0.0, .z = -4.0 },
+        lower_teal
+    )});
+
+    try scene.buildBvh(1);
+
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const parallel_raytracer = ParallelRayTracer {
+        .settings = render_settings,
+        .io = threaded.io(),
+        .progress_root_node = root_node
+    };
+
+    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
+    const writer = &buf_writer;
+    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
+
+    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
+    print("Render completed successfully.\n", .{});
 }
 
 test {

@@ -198,7 +198,11 @@ pub fn Interval(comptime T: type) type {
         }
 
         pub fn expand(self: Self, delta: T) Self {
-            const padding = @divTrunc(delta, 2);
+            const padding = switch(@typeInfo(T)) {
+                .int => @divTrunc(delta, 2),
+                .float => delta / 2.0,
+                else => unreachable
+            };
 
             return .{
                 .min = self.min - padding,
@@ -423,11 +427,27 @@ test "Interval.expand" {
     try std.testing.expectApproxEqAbs(0.0, expandedF.min, floatEps(f32));
     try std.testing.expectApproxEqAbs(6.0, expandedF.max, floatEps(f32));
 
+    const smallExpandedF = intvlF.expand(0.1);
+    try std.testing.expectApproxEqAbs(0.95, smallExpandedF.min, floatEps(f32));
+    try std.testing.expectApproxEqAbs(5.05, smallExpandedF.max, floatEps(f32));
+
+    const zeroExpandedF = intvlF.expand(0.0);
+    try std.testing.expectApproxEqAbs(1.0, zeroExpandedF.min, floatEps(f32));
+    try std.testing.expectApproxEqAbs(5.0, zeroExpandedF.max, floatEps(f32));
+
     const IntervalI32 = Interval(i32);
     const intvlI = IntervalI32{ .min = -2, .max = 4 };
     const expandedI = intvlI.expand(2);
     try std.testing.expectEqual(@as(i32, -3), expandedI.min);
     try std.testing.expectEqual(@as(i32, 5), expandedI.max);
+
+    const oddExpandedI = intvlI.expand(3);
+    try std.testing.expectEqual(@as(i32, -3), oddExpandedI.min); // -2 - 1 = -3
+    try std.testing.expectEqual(@as(i32, 5), oddExpandedI.max);  // 4 + 1 = 5
+
+    const zeroExpandedI = intvlI.expand(0);
+    try std.testing.expectEqual(@as(i32, -2), zeroExpandedI.min);
+    try std.testing.expectEqual(@as(i32, 4), zeroExpandedI.max);
 }
 
 test "Interval.initEncloseTwo" {

@@ -25,7 +25,7 @@ const createImgFile = fs_utils.createImgFile;
 const computePathStrLen = fs_utils.computePathStrLen;
 
 const IMG_WIDTH = 400;
-const IMG_HEIGHT= 400;
+const IMG_HEIGHT= 225;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
 const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
@@ -48,7 +48,8 @@ pub fn main(init: std.process.Init) !void {
     defer memory_map.destroy(init.io);
 
     // try initAndRenderSpheresScene(init.io, init.arena.allocator(), memory_map.memory);
-    try initAndRenderQuadsScene(init.io, init.arena.allocator(), memory_map.memory);
+    // try initAndRenderQuadsScene(init.io, init.arena.allocator(), memory_map.memory);
+    try initAndRenderSimpleLightScene(init.io, init.arena.allocator(), memory_map.memory);
 
     try memory_map.write(init.io);
 }
@@ -73,7 +74,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
         10.0,
         0.6,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, LinearColor.white, gpa, 256);
+    var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 256);
     defer scene.deinit();
 
     const big_radius: Float = 1.0;
@@ -229,7 +230,7 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
         10.0,
         0.0,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, LinearColor.white, gpa, 256);
+    var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 256);
     defer scene.deinit();
 
     // Materials
@@ -270,6 +271,57 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
         .{ .x = 0.0, .y = 0.0, .z = -4.0 },
         lower_teal
     )});
+
+    try scene.buildBvh(1);
+
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const parallel_raytracer = ParallelRayTracer {
+        .settings = render_settings,
+        .io = threaded.io(),
+        .progress_root_node = root_node
+    };
+
+    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
+    const writer = &buf_writer;
+    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
+
+    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
+    print("Render completed successfully.\n", .{});
+}
+
+fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
+    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Simple light scene" }) else null;
+    defer if (root_node) |n| n.end();
+
+    const render_settings = RenderSettings {
+        .image_width = IMG_WIDTH,
+        .image_height = IMG_HEIGHT,
+        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
+        .max_ray_bounces = 50,
+        .samples_per_pixel = 100,
+        .pixel_samples_scale = 0.01, // 1/samples_per_pixel
+    };
+
+    const camera = Camera.initLookAt(
+        .{ .x = 26.0, .y = 3.0, .z = 6.0},
+        .{ .x = 0.0, .y = 2.0, .z = 0.0 },
+        20.0,
+        10.0,
+        0.0,
+        render_settings);
+    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 256);
+    defer scene.deinit();
+
+    // Materials
+    const sphere_mat = Material { .lambertian = .{ .albedo = .init(0.7, 0.7, 0.7) } };
+    const ground_mat = Material { .lambertian = .{ .albedo = .init(0.6, 0.6, 0.6) } };
+    const light_mat  = Material { .diffuse_light = .{ .color = .init(4.0, 4.0, 4.0) } };
+
+    // Primitives
+    try scene.add(.{ .sphere = .init(.{ .x = 0.0, .y = -1000.0, .z = 0.0 }, 1000.0, ground_mat) });
+    try scene.add(.{ .sphere = .init(.{ .x = 0.0, .y = 2.0, .z = 0.0 }, 2.0, sphere_mat) });
+    try scene.add(.{ .quad = .init(.{ .x = 3.0, .y = 1.0, .z = -2.0 }, .{ .x = 2.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 2.0, .z = 0.0 }, light_mat) });
 
     try scene.buildBvh(1);
 

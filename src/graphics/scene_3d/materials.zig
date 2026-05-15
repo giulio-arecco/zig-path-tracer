@@ -12,16 +12,25 @@ pub const Material = union(enum) {
     lambertian: Lambertian,
     metal: Metal,
     dielectic: Dielectric,
+    diffuse_light: DiffuseLight,
 
-    pub fn scatter(self: Material, ray: Ray, hit: HitRecord, rand: std.Random) ScatterResult {
+    pub fn scatter(self: Material, ray: Ray, hit: HitRecord, rand: std.Random) ?ScatterResult {
         return switch (self) {
+            .diffuse_light => null,
             inline else => |mat| mat.scatter(ray, hit, rand)
+        };
+    }
+
+    pub fn emit(self: Material) ?LinearColor {
+        return switch(self) {
+            .diffuse_light => |light| light.emit(),
+            inline else => null
         };
     }
 };
 
 pub const ScatterResult = struct {
-    scattered_ray: ?Ray,
+    scattered_ray: Ray,
     attenuation: LinearColor
 };
 
@@ -48,7 +57,7 @@ pub const Metal = struct {
     /// The fuzziness factor must be in range `[0.0, 1.0]`
     fuzz: Float,
 
-    pub fn scatter(self: Metal, ray: Ray, hit: HitRecord, rand: std.Random) ScatterResult {
+    pub fn scatter(self: Metal, ray: Ray, hit: HitRecord, rand: std.Random) ?ScatterResult {
         std.debug.assert(self.fuzz >= 0.0 and self.fuzz <= 1.0);
 
         const reflected_dir = ray.dir.reflectOnUnit(hit.normal).normalized();
@@ -56,7 +65,10 @@ pub const Metal = struct {
         const scatter_dir = reflected_dir.add(fuzz_dir);
         const scattered_ray = Ray { .origin = hit.point, .dir = scatter_dir };
 
-        return .{ .scattered_ray = if (dot(scatter_dir, hit.normal) > 0) scattered_ray else null, .attenuation = self.albedo } ;
+        return if (dot(scatter_dir, hit.normal) <= 0) null else .{
+            .scattered_ray = scattered_ray,
+            .attenuation = self.albedo
+        };
     }
 };
 
@@ -95,5 +107,13 @@ pub const Dielectric = struct {
         const r0 = (1.0 - refractive_index) / (1.0 + refractive_index);
         const r0_sq = r0 * r0;
         return r0_sq + (1 - r0_sq) * std.math.pow(Float, (1.0 - cosine), 5.0);
+    }
+};
+
+pub const DiffuseLight = struct {
+    color: LinearColor,
+
+    pub fn emit(self: DiffuseLight) LinearColor {
+        return self.color;
     }
 };

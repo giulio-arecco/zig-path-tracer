@@ -228,7 +228,7 @@ pub const Aabb = struct {
             .z = if (a.z <= b.z) .{ .min = a.z, .max = b.z } else .{ .min = b.z, .max = a.z },
         };
 
-        box.padToMinimums(0.0001);
+        box.padToMinimums();
         return box;
     }
 
@@ -239,7 +239,7 @@ pub const Aabb = struct {
             .z = IntervalFloat.initEncloseTwo(box0.z, box1.z)
         };
 
-        box.padToMinimums(0.0001);
+        box.padToMinimums();
         return box;
     }
 
@@ -294,11 +294,22 @@ pub const Aabb = struct {
         return res_t_range;
     }
 
-    /// Adjust the AABB so taht no side is narrower than the passed delta value, if necessary.
-    fn padToMinimums(self: *Aabb, delta: Float) void {
-        if (self.x.size() < delta) self.x = self.x.expand(delta);
-        if (self.y.size() < delta) self.y = self.y.expand(delta);
-        if (self.z.size() < delta) self.z = self.z.expand(delta);
+    /// Adjust the AABB so that no side is narrower than a dynamically calculated safe delta, if necessary.
+    fn padToMinimums(self: *Aabb) void {
+        // The delta is dynamically calculated to avoid floating point precision errors
+        const max_abs_x = @max(@abs(self.x.min), @abs(self.x.max));
+        const max_abs_y = @max(@abs(self.y.min), @abs(self.y.max));
+        const max_abs_z = @max(@abs(self.z.min), @abs(self.z.max));
+        const max_coord = @max(max_abs_x, max_abs_y, max_abs_z);
+
+        // Compute the machine error for the maximum coordinate value
+        const local_eps = std.math.floatEpsAt(Float, max_coord);
+        // Compute the safe delta by multiplying for some safe factor
+        const safe_delta = @max(0.0001, local_eps * 32.0);
+
+        if (self.x.size() < safe_delta) self.x = self.x.expand(safe_delta);
+        if (self.y.size() < safe_delta) self.y = self.y.expand(safe_delta);
+        if (self.z.size() < safe_delta) self.z = self.z.expand(safe_delta);
     }
 };
 
@@ -898,19 +909,20 @@ test "BvhTree.hit - outside range" {
 
 test "Aabb.padToMinimums" {
     var bbox = Aabb{
-        .x = IntervalFloat{ .min = 0.0, .max = 0.05 },
+        .x = IntervalFloat{ .min = 0.0, .max = 0.00005 },
         .y = IntervalFloat{ .min = 0.0, .max = 0.2 },
-        .z = IntervalFloat{ .min = 0.0, .max = 0.05 },
+        .z = IntervalFloat{ .min = 0.0, .max = 0.00005 },
     };
 
-    bbox.padToMinimums(0.1);
+    bbox.padToMinimums();
 
-    try testing.expectApproxEqAbs(@as(Float, -0.05), bbox.x.min, absEps);
-    try testing.expectApproxEqAbs(@as(Float, 0.1), bbox.x.max, absEps);
+    const expected_padding = 0.0001 / 2.0;
+    try testing.expectApproxEqAbs(@as(Float, 0.0 - expected_padding), bbox.x.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 0.00005 + expected_padding), bbox.x.max, absEps);
 
     try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.y.min, absEps);
     try testing.expectApproxEqAbs(@as(Float, 0.2), bbox.y.max, absEps);
 
-    try testing.expectApproxEqAbs(@as(Float, -0.05), bbox.z.min, absEps);
-    try testing.expectApproxEqAbs(@as(Float, 0.1), bbox.z.max, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 0.0 - expected_padding), bbox.z.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 0.00005 + expected_padding), bbox.z.max, absEps);
 }

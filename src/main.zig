@@ -362,7 +362,7 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
         10.0,
         0.0,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 6);
+    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 8);
     defer scene.deinit();
 
     // Materials
@@ -378,6 +378,8 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, white) });
     try scene.add(.{ .quad = .init(.{ .x = 555.0, .y = 555.0, .z = 555.0 }, .{ .x = -555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = -555.0 }, white) });
     try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 555.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, white) });
+    try scene.add(.{ .box = .init(.{ .x = 130.0, .y = 0.0, .z = 65.0 }, .{ .x = 295.0, .y = 165.0, .z = 230.0 }, white) });
+    try scene.add(.{ .box = .init(.{ .x = 265.0, .y = 0.0, .z = 295.0 }, .{ .x = 430.0, .y = 330.0, .z = 460.0 }, white) });
 
     try scene.buildBvh(1);
 

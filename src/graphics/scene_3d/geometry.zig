@@ -172,6 +172,79 @@ pub const Quad = struct {
     }
 };
 
+pub const Box = struct {
+    /// The box faces.\
+    /// Treat as **immutable**.
+    faces: [6]Quad,
+    /// The box material.\
+    /// Treat as **immutable**.
+    material: Material,
+    /// The box axis-aligned bounding box.\
+    /// Treat as **immutable**.
+    bbox: Aabb,
+
+    /// Initialize a 3D box (six sides) that contains the two opposite vertices a and b
+    pub fn init(a: Vec3, b: Vec3, mat: Material) Box {
+        const min = Vec3 { .x = @min(a.x, b.x), .y = @min(a.y, b.y), .z = @min(a.z, b.z) };
+        const max = Vec3 { .x = @max(a.x, b.x), .y = @max(a.y, b.y), .z = @max(a.z, b.z) };
+
+        const dx = Vec3 { .x = max.x - min.x, .y = 0.0, .z = 0.0 };
+        const dy = Vec3 { .x = 0.0, .y = max.y - min.y, .z = 0.0 };
+        const dz = Vec3 { .x = 0.0, .y = 0.0, .z = max.z - min.z };
+
+        const front  = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dy, dx, mat);
+        const right  = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dz, dy, mat);
+        const back   = Quad.init(.{ .x = min.x, .y = min.y, .z = max.z }, dx, dy, mat);
+        const left   = Quad.init(.{ .x = max.x, .y = min.y, .z = min.z }, dy, dz, mat);
+        const top    = Quad.init(.{ .x = min.x, .y = max.y, .z = min.z }, dz, dx, mat);
+        const bottom = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dx, dz, mat);
+        const faces = [6]Quad { front, right, back, left, top, bottom };
+
+        var bbox = Aabb.initMergeTwo(faces[0].bbox, faces[1].bbox);
+        inline for(2..faces.len) |i| {
+            bbox = Aabb.initMergeTwo(bbox, faces[i].bbox);
+        }
+
+        return .{
+            .faces = faces,
+            .material = mat,
+            .bbox = bbox
+        };
+    }
+
+    pub fn hit(self: Box, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
+        var current_t_range = ray_t_range;
+        var hit_anything = false;
+
+        for (self.faces) |quad| {
+            if (quad.hit(ray, current_t_range, hit_record)) {
+                current_t_range.max = hit_record.t;
+                hit_anything = true;
+            }
+        }
+
+        return hit_anything;
+    }
+};
+
+pub const Hittable = union(enum) {
+    sphere: Sphere,
+    quad: Quad,
+    box: Box,
+
+    pub fn hit(self: Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
+        switch (self) {
+            inline else => |hittable| return hittable.hit(ray, ray_t_range, hit_record)
+        }
+    }
+
+    pub fn bbox(self: Hittable) Aabb {
+        switch (self) {
+            inline else => |hittable| return hittable.bbox
+        }
+    }
+};
+
 pub const HitRecord = struct {
     t: Float,
     point: Vec3,
@@ -190,23 +263,6 @@ pub const HitRecord = struct {
         const normal = if (front_face) outward_normal else outward_normal.negated();
 
         return .{ front_face, normal };
-    }
-};
-
-pub const Hittable = union(enum) {
-    sphere: Sphere,
-    quad: Quad,
-
-    pub fn hit(self: Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
-        switch (self) {
-            inline else => |hittable| return hittable.hit(ray, ray_t_range, hit_record)
-        }
-    }
-
-    pub fn bbox(self: Hittable) Aabb {
-        switch (self) {
-            inline else => |hittable| return hittable.bbox
-        }
     }
 };
 
@@ -925,4 +981,87 @@ test "Aabb.padToMinimums" {
 
     try testing.expectApproxEqAbs(@as(Float, 0.0 - expected_padding), bbox.z.min, absEps);
     try testing.expectApproxEqAbs(@as(Float, 0.00005 + expected_padding), bbox.z.max, absEps);
+}
+
+test "Box.init" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
+    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const box = Box.init(a, b, test_material);
+
+    try testing.expectEqual(@as(usize, 6), box.faces.len);
+
+    const box_eps: Float = 0.001;
+    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox.x.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox.x.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox.y.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox.y.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox.z.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox.z.max, box_eps);
+}
+
+test "Box.hit - ray hits box" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
+    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const box = Box.init(a, b, test_material);
+
+    // Ray looking backwards (-z)
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = box.hit(ray, ray_t_range, &h);
+    try testing.expect(hit);
+
+    if (hit) {
+        // Hits the z=1.0 face exactly at t=4.0
+        try testing.expectApproxEqRel(@as(Float, 4.0), h.t, relEps);
+        try testing.expect(h.front_face);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.y, absEps);
+        try testing.expectApproxEqRel(@as(Float, 1.0), h.normal.z, relEps);
+
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.y, absEps);
+        try testing.expectApproxEqRel(@as(Float, 1.0), h.point.z, relEps);
+    }
+}
+
+test "Box.hit - ray misses box" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
+    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const box = Box.init(a, b, test_material);
+
+    // Ray looking backward but translated high above the box on y max range
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 5.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = box.hit(ray, ray_t_range, &h);
+    try testing.expect(!hit);
+}
+
+test "Box.hit - ray originates inside box" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const a = Vec3{ .x = -2.0, .y = -2.0, .z = -2.0 };
+    const b = Vec3{ .x = 2.0, .y = 2.0, .z = 2.0 };
+    const box = Box.init(a, b, test_material);
+
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = box.hit(ray, ray_t_range, &h);
+    try testing.expect(hit);
+
+    if (hit) {
+        // Hits the inner side of x=2.0 right face. t=2.0
+        try testing.expectApproxEqRel(@as(Float, 2.0), h.t, relEps);
+        try testing.expect(!h.front_face);
+        try testing.expectApproxEqRel(@as(Float, -1.0), h.normal.x, relEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.y, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.z, absEps);
+    }
 }

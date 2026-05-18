@@ -231,7 +231,7 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
         10.0,
         0.0,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 256);
+    var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 5);
     defer scene.deinit();
 
     // Materials
@@ -311,7 +311,7 @@ fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []
         10.0,
         0.0,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 256);
+    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 3);
     defer scene.deinit();
 
     // Materials
@@ -362,7 +362,7 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
         10.0,
         0.0,
         render_settings);
-    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 256);
+    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 6);
     defer scene.deinit();
 
     // Materials

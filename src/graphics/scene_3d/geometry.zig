@@ -18,28 +18,17 @@ const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
 
 
 pub const Sphere = struct {
-    /// The sphere center.\
-    /// Treat as **immutable**.
     center: Vec3,
-    /// The sphere radius.\
-    /// Treat as **immutable**.
     radius: Float,
-    /// The sphere material.\
-    /// Treat as **immutable**.
-    material: Material,
-    /// The sphere axis-aligned bounding box.\
-    /// Treat as **immutable**.
-    bbox: Aabb,
+    /// Pointer to the `Sphere` material.\
+    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid double frees.
+    material: *const Material,
 
-    pub fn init(center: Vec3, radius: Float, mat: Material) Sphere {
-        const radius_vec = Vec3 { .x = radius, .y = radius, .z = radius };
-        const bbox = Aabb.initFromPoints(center.sub(radius_vec), center.add(radius_vec));
-
+    pub fn init(center: Vec3, radius: Float, mat: *const Material) Sphere {
         return .{
             .center = center,
             .radius = radius,
             .material = mat,
-            .bbox = bbox
         };
     }
 
@@ -83,6 +72,11 @@ pub const Sphere = struct {
         };
         return true;
     }
+
+    pub fn bbox(self: Sphere) Aabb {
+        const radius_vec = Vec3 { .x = self.radius, .y = self.radius, .z = self.radius };
+        return Aabb.initFromPoints(self.center.sub(radius_vec), self.center.add(radius_vec));
+    }
 };
 
 pub const Quad = struct {
@@ -106,18 +100,11 @@ pub const Quad = struct {
     /// The `D` term in the implicit formula for the plane containing the quad: Ax + By + Cz + D = 0.\
     /// Treat as **immutable**.
     d: Float,
-    /// The quad material.\
-    /// Treat as **immutable**.
-    material: Material,
-    /// The quad axis-aligned bounding box.\
-    /// Treat as **immutable**.
-    bbox: Aabb,
+    /// Pointer to the `Quad` material.\
+    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid double frees.
+    material: *const Material,
 
-    pub fn init(q: Vec3, u: Vec3, v: Vec3, mat: Material) Quad {
-        const box0 = Aabb.initFromPoints(q, q.add(u).add(v));
-        const box1 = Aabb.initFromPoints(q.add(u), q.add(v));
-        const aabb = Aabb.initMergeTwo(box0, box1);
-
+    pub fn init(q: Vec3, u: Vec3, v: Vec3, mat: *const Material) Quad {
         const n = cross(u, v);
         const normal = n.normalized();
         const d = dot(normal, q);
@@ -131,7 +118,6 @@ pub const Quad = struct {
             .normal = normal,
             .d = d,
             .material = mat,
-            .bbox = aabb
         };
     }
 
@@ -170,21 +156,22 @@ pub const Quad = struct {
         };
         return true;
     }
+
+    pub fn bbox(self: Quad) Aabb {
+        const box0 = Aabb.initFromPoints(self.q, self.q.add(self.u).add(self.v));
+        const box1 = Aabb.initFromPoints(self.q.add(self.u), self.q.add(self.v));
+        return Aabb.initMergeTwo(box0, box1);
+    }
 };
 
+// TODO: Fix material ownership: who owns the material, the faces or the box?
 pub const Box = struct {
     /// The box faces.\
     /// Treat as **immutable**.
     faces: [6]Quad,
-    /// The box material.\
-    /// Treat as **immutable**.
-    material: Material,
-    /// The box axis-aligned bounding box.\
-    /// Treat as **immutable**.
-    bbox: Aabb,
 
     /// Initialize a 3D box (six sides) that contains the two opposite vertices a and b
-    pub fn init(a: Vec3, b: Vec3, mat: Material) Box {
+    pub fn init(a: Vec3, b: Vec3, mat: *const Material) Box {
         const min = Vec3 { .x = @min(a.x, b.x), .y = @min(a.y, b.y), .z = @min(a.z, b.z) };
         const max = Vec3 { .x = @max(a.x, b.x), .y = @max(a.y, b.y), .z = @max(a.z, b.z) };
 
@@ -200,16 +187,17 @@ pub const Box = struct {
         const bottom = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dx, dz, mat);
         const faces = [6]Quad { front, right, back, left, top, bottom };
 
-        var bbox = Aabb.initMergeTwo(faces[0].bbox, faces[1].bbox);
-        inline for(2..faces.len) |i| {
-            bbox = Aabb.initMergeTwo(bbox, faces[i].bbox);
-        }
-
         return .{
             .faces = faces,
-            .material = mat,
-            .bbox = bbox
         };
+    }
+
+    /// Allocates and returns a pointer to a 3D box that contains the two opposite vertices a and b.\
+    /// The passed allocator should always be the same that's cached in the Scene struct at initialization and later used for deinit.
+    pub fn alloc(a: Vec3, b: Vec3, mat: *const Material, scene_allocator: Allocator) !*Box {
+        const box_ptr = try scene_allocator.create(Box);
+        box_ptr.* = Box.init(a, b, mat);
+        return box_ptr;
     }
 
     pub fn hit(self: Box, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
@@ -225,12 +213,21 @@ pub const Box = struct {
 
         return hit_anything;
     }
+
+    pub fn bbox(self: Box) Aabb {
+        var aabb = Aabb.initMergeTwo(self.faces[0].bbox(), self.faces[1].bbox());
+        inline for(2..self.faces.len) |i| {
+            aabb = Aabb.initMergeTwo(aabb, self.faces[i].bbox());
+        }
+        return aabb;
+    }
 };
 
 pub const Hittable = union(enum) {
     sphere: Sphere,
     quad: Quad,
-    box: Box,
+    /// Box, owned by the Hittable union.
+    box: *const Box,
 
     pub fn hit(self: Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         switch (self) {
@@ -240,8 +237,19 @@ pub const Hittable = union(enum) {
 
     pub fn bbox(self: Hittable) Aabb {
         switch (self) {
-            inline else => |hittable| return hittable.bbox
+            inline else => |hittable| return hittable.bbox()
         }
+    }
+
+    /// Frees heap allocated memory for a Hittable union.\
+    /// The passed allocator should always be the same that's cached in the Scene struct at initialization.
+    pub fn deinit(self: *Hittable, scene_allocator: Allocator) void {
+        switch(self.*) {
+            .box => |box| scene_allocator.destroy(box),
+            else => {}
+        }
+
+        self.* = undefined;
     }
 };
 
@@ -249,7 +257,8 @@ pub const HitRecord = struct {
     t: Float,
     point: Vec3,
     normal: Vec3,
-    material: Material,
+    /// The HitRecord struct never owns the memory referenced by this pointer.
+    material: *const Material,
     front_face: bool,
 
     /// Determines a normal vector orientation. The resulting normal will always point against the ray.\
@@ -568,26 +577,26 @@ test "Sphere.init" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const center = Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 };
     const radius: Float = 4.0;
-    const sphere = Sphere.init(center, radius, test_material);
+    const sphere = Sphere.init(center, radius, &test_material);
 
     try testing.expectApproxEqAbs(1.0, sphere.center.x, absEps);
     try testing.expectApproxEqAbs(2.0, sphere.center.y, absEps);
     try testing.expectApproxEqAbs(3.0, sphere.center.z, absEps);
     try testing.expectApproxEqAbs(4.0, sphere.radius, absEps);
 
-    try testing.expectApproxEqAbs(-3.0, sphere.bbox.x.min, absEps);
-    try testing.expectApproxEqAbs(5.0, sphere.bbox.x.max, absEps);
-    try testing.expectApproxEqAbs(-2.0, sphere.bbox.y.min, absEps);
-    try testing.expectApproxEqAbs(6.0, sphere.bbox.y.max, absEps);
-    try testing.expectApproxEqAbs(-1.0, sphere.bbox.z.min, absEps);
-    try testing.expectApproxEqAbs(7.0, sphere.bbox.z.max, absEps);
+    try testing.expectApproxEqAbs(-3.0, sphere.bbox().x.min, absEps);
+    try testing.expectApproxEqAbs(5.0, sphere.bbox().x.max, absEps);
+    try testing.expectApproxEqAbs(-2.0, sphere.bbox().y.min, absEps);
+    try testing.expectApproxEqAbs(6.0, sphere.bbox().y.max, absEps);
+    try testing.expectApproxEqAbs(-1.0, sphere.bbox().z.min, absEps);
+    try testing.expectApproxEqAbs(7.0, sphere.bbox().z.max, absEps);
 }
 
 test "Sphere.hit - ray hits sphere" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const center = Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 };
     const radius: Float = 2.0;
-    const sphere = Sphere.init(center, radius, test_material);
+    const sphere = Sphere.init(center, radius, &test_material);
 
     const ray = Ray { .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
     const ray_t_range = IntervalFloat { .min = 0.0, .max = 100.0 };
@@ -613,7 +622,7 @@ test "Sphere.hit - ray misses sphere" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const center = Vec3 { .x = 5.0, .y = 5.0, .z = -10.0 };
     const radius: Float = 2.0;
-    const sphere = Sphere.init(center, radius, test_material);
+    const sphere = Sphere.init(center, radius, &test_material);
 
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
     const ray_t_range = IntervalFloat { .min = 0.0, .max = 100.0 };
@@ -627,7 +636,7 @@ test "Sphere.hit - ray hits sphere from inside" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const center = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
     const radius: Float = 5.0;
-    const sphere = Sphere.init(center, radius, test_material);
+    const sphere = Sphere.init(center, radius, &test_material);
 
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
     const ray_t_range = IntervalFloat { .min = 0.0, .max = 100.0 };
@@ -647,7 +656,7 @@ test "Sphere.hit - ray hits sphere from inside" {
         try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.y, absEps);
         try testing.expectApproxEqRel(@as(Float, -5.0), h.point.z, relEps);
 
-        try testing.expect(std.meta.activeTag(h.material) == std.meta.activeTag(test_material));
+        try testing.expect(std.meta.activeTag(h.material.*) == std.meta.activeTag(test_material));
     }
 }
 
@@ -655,7 +664,7 @@ test "Sphere.hit - hit outside range" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const center = Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 };
     const radius: Float = 2.0;
-    const sphere = Sphere.init(center, radius, test_material);
+    const sphere = Sphere.init(center, radius, &test_material);
 
     const ray = Ray{ .origin = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 } };
     // The hit occurs at t=8.0. Set max < 8.0
@@ -666,12 +675,27 @@ test "Sphere.hit - hit outside range" {
     try testing.expect(!hit);
 }
 
+test "Sphere.bbox" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const center = Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 };
+    const radius: Float = 4.0;
+    const sphere = Sphere.init(center, radius, &test_material);
+
+    const bbox = sphere.bbox();
+    try testing.expectApproxEqAbs(@as(Float, -3.0), bbox.x.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 5.0), bbox.x.max, absEps);
+    try testing.expectApproxEqAbs(@as(Float, -2.0), bbox.y.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 6.0), bbox.y.max, absEps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), bbox.z.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 7.0), bbox.z.max, absEps);
+}
+
 test "Quad.init" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const q = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
     const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
     const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
-    const quad = Quad.init(q, u, v, test_material);
+    const quad = Quad.init(q, u, v, &test_material);
 
     try testing.expectApproxEqAbs(0.0, quad.q.x, absEps);
     try testing.expectApproxEqAbs(2.0, quad.u.x, absEps);
@@ -691,7 +715,7 @@ test "Quad.hit - ray hits quad" {
     const q = Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 };
     const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
     const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
-    const quad = Quad.init(q, u, v, test_material);
+    const quad = Quad.init(q, u, v, &test_material);
 
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
@@ -718,7 +742,7 @@ test "Quad.hit - ray misses quad" {
     const q = Vec3{ .x = 2.0, .y = 2.0, .z = -5.0 };
     const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
     const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
-    const quad = Quad.init(q, u, v, test_material);
+    const quad = Quad.init(q, u, v, &test_material);
 
     // Ray goes straight down Z through origin, quad is shifted to x,y > 2
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
@@ -734,7 +758,7 @@ test "Quad.hit - ray parallel to quad" {
     const q = Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 };
     const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
     const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
-    const quad = Quad.init(q, u, v, test_material);
+    const quad = Quad.init(q, u, v, &test_material);
 
     // Ray is parallel to the quad (moves along X axis)
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = -2.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
@@ -743,6 +767,23 @@ test "Quad.hit - ray parallel to quad" {
     var h: HitRecord = undefined;
     const hit = quad.hit(ray, ray_t_range, &h);
     try testing.expect(!hit);
+}
+
+test "Quad.bbox" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const q = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
+    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const quad = Quad.init(q, u, v, &test_material);
+
+    const bbox = quad.bbox();
+    const box_eps: Float = 0.001; // Padding creates a small expansion
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.x.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 2.0), bbox.x.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.y.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 2.0), bbox.y.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.z.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.z.max, box_eps);
 }
 
 test "HitRecord.determineNormalOrientation" {
@@ -895,9 +936,9 @@ test "Aabb.longest_axis" {
 test "BvhTree.init and BvhTree.deinit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = 0.0 }, 1.0, test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 10.0, .z = 0.0 }, 1.0, test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 10.0, .z = 0.0 }, 1.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
@@ -910,8 +951,8 @@ test "BvhTree.init and BvhTree.deinit" {
 test "BvhTree.hit - hit something" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 }, 2.0, test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = 0.0 }, 1.0, test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 }, 2.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
@@ -931,8 +972,8 @@ test "BvhTree.hit - hit something" {
 test "BvhTree.hit - miss everything" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = -10.0 }, 2.0, test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = -10.0, .y = 0.0, .z = 0.0 }, 1.0, test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = -10.0 }, 2.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = -10.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
@@ -949,7 +990,7 @@ test "BvhTree.hit - miss everything" {
 test "BvhTree.hit - outside range" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 }, 2.0, test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 }, 2.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
@@ -987,24 +1028,24 @@ test "Box.init" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
     const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
-    const box = Box.init(a, b, test_material);
+    const box = Box.init(a, b, &test_material);
 
     try testing.expectEqual(@as(usize, 6), box.faces.len);
 
     const box_eps: Float = 0.001;
-    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox.x.min, box_eps);
-    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox.x.max, box_eps);
-    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox.y.min, box_eps);
-    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox.y.max, box_eps);
-    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox.z.min, box_eps);
-    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox.z.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox().x.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox().x.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox().y.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox().y.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), box.bbox().z.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), box.bbox().z.max, box_eps);
 }
 
 test "Box.hit - ray hits box" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
     const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
-    const box = Box.init(a, b, test_material);
+    const box = Box.init(a, b, &test_material);
 
     // Ray looking backwards (-z)
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
@@ -1032,7 +1073,7 @@ test "Box.hit - ray misses box" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
     const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
-    const box = Box.init(a, b, test_material);
+    const box = Box.init(a, b, &test_material);
 
     // Ray looking backward but translated high above the box on y max range
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 5.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
@@ -1047,7 +1088,7 @@ test "Box.hit - ray originates inside box" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     const a = Vec3{ .x = -2.0, .y = -2.0, .z = -2.0 };
     const b = Vec3{ .x = 2.0, .y = 2.0, .z = 2.0 };
-    const box = Box.init(a, b, test_material);
+    const box = Box.init(a, b, &test_material);
 
     const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
@@ -1064,4 +1105,73 @@ test "Box.hit - ray originates inside box" {
         try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.y, absEps);
         try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.z, absEps);
     }
+}
+
+test "Box.bbox" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
+    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const box = Box.init(a, b, &test_material);
+
+    const bbox = box.bbox();
+    const box_eps: Float = 0.001;
+    try testing.expectApproxEqAbs(@as(Float, -1.0), bbox.x.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), bbox.x.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), bbox.y.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), bbox.y.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, -1.0), bbox.z.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 1.0), bbox.z.max, box_eps);
+}
+
+test "Box.alloc" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const a = Vec3{ .x = -2.0, .y = -2.0, .z = -2.0 };
+    const b = Vec3{ .x = 2.0, .y = 2.0, .z = 2.0 };
+
+    const box_ptr = try Box.alloc(a, b, &test_material, testing.allocator);
+    defer testing.allocator.destroy(box_ptr);
+
+    try testing.expectEqual(@as(usize, 6), box_ptr.faces.len);
+
+    const box_eps: Float = 0.001;
+    try testing.expectApproxEqAbs(@as(Float, -2.0), box_ptr.bbox().x.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 2.0), box_ptr.bbox().x.max, box_eps);
+}
+
+test "Hittable.bbox" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+
+    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const hittable_sphere = Hittable{ .sphere = sphere };
+    const bbox_sphere = hittable_sphere.bbox();
+    try testing.expectApproxEqAbs(@as(Float, -1.0), bbox_sphere.x.min, absEps);
+
+    const quad = Quad.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 }, &test_material);
+    const hittable_quad = Hittable{ .quad = quad };
+    const bbox_quad = hittable_quad.bbox();
+    const box_eps: Float = 0.001;
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox_quad.x.min, box_eps);
+
+    const box_ptr = try Box.alloc(Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 }, Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }, &test_material, testing.allocator);
+    var hittable_box = Hittable{ .box = box_ptr };
+    defer hittable_box.deinit(testing.allocator);
+
+    const bbox_box = hittable_box.bbox();
+    try testing.expectApproxEqAbs(@as(Float, -1.0), bbox_box.x.min, box_eps);
+}
+
+test "Hittable.deinit" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+
+    // Value variations do not allocate any dynamic memory or get destroyed
+    var sphere_hittable = Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) };
+    sphere_hittable.deinit(testing.allocator);
+
+    var quad_hittable = Hittable{ .quad = Quad.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 }, &test_material) };
+    quad_hittable.deinit(testing.allocator);
+
+    // Test box deletion for memory leaks
+    const box_ptr = try Box.alloc(Vec3{ .x = -5.0, .y = -5.0, .z = -5.0 }, Vec3{ .x = 5.0, .y = 5.0, .z = 5.0 }, &test_material, testing.allocator);
+    var box_hittable = Hittable{ .box = box_ptr };
+    box_hittable.deinit(testing.allocator);
 }

@@ -13,6 +13,7 @@ const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Sphere = graphics.scene_3d.geometry.Sphere;
 const Quad = graphics.scene_3d.geometry.Quad;
+const Box = graphics.scene_3d.geometry.Box;
 const RenderSettings = rendering.RenderSettings;
 const RayTracer = raytracing.RayTracer;
 const ParallelRayTracer = raytracing.ParallelRayTracer;
@@ -47,10 +48,17 @@ pub fn main(init: std.process.Init) !void {
     };
     defer memory_map.destroy(init.io);
 
-    // try initAndRenderSpheresScene(init.io, init.arena.allocator(), memory_map.memory);
-    // try initAndRenderQuadsScene(init.io, init.arena.allocator(), memory_map.memory);
-    // try initAndRenderSimpleLightScene(init.io, init.arena.allocator(), memory_map.memory);
-    try initAndRenderCornellBox(init.io, init.arena.allocator(), memory_map.memory);
+    var gpa = std.heap.DebugAllocator(.{}) {};
+    defer if (gpa.deinit() == .leak) {
+        @panic("Memory leak detected!");
+    };
+
+    const allocator = gpa.allocator();
+
+    // try initAndRenderSpheresScene(init.io, allocator, memory_map.memory);
+    // try initAndRenderQuadsScene(init.io, allocator, memory_map.memory);
+    // try initAndRenderSimpleLightScene(init.io, allocator, memory_map.memory);
+    try initAndRenderCornellBox(init.io, allocator, memory_map.memory);
 
     try memory_map.write(init.io);
 }
@@ -81,22 +89,22 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
     const big_radius: Float = 1.0;
     const small_radius: Float = 0.2;
 
-    const ground_material = Material { .lambertian = .{ .albedo = .init(0.5, 0.5, 0.5) } };
+    const ground_material = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.5, 0.5, 0.5) } });
     const center_ground = Vec3 { .x = 0.0, .y = -1000.0, .z = 0.0 };
     try scene.add(.{ .sphere = .init(center_ground, 1000, ground_material) });
 
-    const material_1 = Material { .dielectic = .{ .refractive_index = 1.5 }};
+    const material_1 = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
     const center_1 = Vec3 { .x = 0.0, .y = 1.0, .z = 0.0 };
     try scene.add(.{ .sphere = .init(center_1, 1.0, material_1) });
 
-    const material_1_inside = Material { .dielectic = .{ .refractive_index = 1.0 / 1.5 }};
+    const material_1_inside = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.0 / 1.5 } });
     try scene.add(.{ .sphere = .init(center_1, 0.5, material_1_inside) });
 
-    const material_2 = Material { .lambertian = .{ .albedo = .init(0.4, 0.2, 0.1) } };
+    const material_2 = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.4, 0.2, 0.1) } });
     const center_2 = Vec3 { .x = -4.0, .y = 1.0, .z = 0.0 };
     try scene.add(.{ .sphere = .init(center_2, 1.0, material_2) });
 
-    const material_3 = Material { .metal = .{ .albedo = .init(0.7, 0.6, 0.5), .fuzz = 0.0 }};
+    const material_3 = try scene.createMaterial(. { .metal = .{ .albedo = .init(0.7, 0.6, 0.5), .fuzz = 0.0 } });
     const center_3 = Vec3 { .x = 4.0, .y = 1.0, .z = 0.0 };
     try scene.add(.{ .sphere = .init(center_3, 1.0, material_3) });
 
@@ -135,19 +143,21 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
                 if (choose_mat < 0.7) {
                     // lambertian
                     const albedo = LinearColor.random(rand).mul(LinearColor.random(rand));
-                    const lambertian = Material { .lambertian = .{ .albedo = albedo } };
+
+                    const lambertian = try scene.createMaterial(.{ .lambertian = .{ .albedo = albedo } });
                     try scene.add(.{ .sphere = .init(center, small_radius, lambertian) });
                 }
                 else if (choose_mat < 0.85) {
                     // metal
                     const albedo = LinearColor.randomInRange(rand, 0.5, 1.0);
                     const fuzz = math_utils.rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0 }, .{ .min = 0.0, .max = 0.5});
-                    const metal = Material { .metal = .{ .albedo = albedo, .fuzz = fuzz }};
+
+                    const metal = try scene.createMaterial(.{ .metal = .{ .albedo = albedo, .fuzz = fuzz } });
                     try scene.add(.{ .sphere = .init(center, small_radius, metal) });
                 }
                 else {
                     // glass
-                    const dielectric = Material { .dielectic = .{ .refractive_index = 1.5 }};
+                    const dielectric = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
                     try scene.add(.{ .sphere = .init(center, small_radius, dielectric) });
                 }
             }
@@ -235,11 +245,11 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     defer scene.deinit();
 
     // Materials
-    const left_red     = Material { .lambertian = .{ .albedo = LinearColor.init(1.0, 0.2, 0.2) } };
-    const back_green   = Material { .lambertian = .{ .albedo = LinearColor.init(0.2, 1.0, 0.2) } };
-    const right_blue   = Material { .lambertian = .{ .albedo = LinearColor.init(0.2, 0.2, 1.0) } };
-    const upper_orange = Material { .lambertian = .{ .albedo = LinearColor.init(1.0, 0.5, 0.0) } };
-    const lower_teal   = Material { .lambertian = .{ .albedo = LinearColor.init(0.2, 0.8, 0.8) } };
+    const left_red     = try scene.createMaterial(.{ .lambertian = .{ .albedo = LinearColor.init(1.0, 0.2, 0.2) } });
+    const back_green   = try scene.createMaterial(.{ .lambertian = .{ .albedo = LinearColor.init(0.2, 1.0, 0.2) } });
+    const right_blue   = try scene.createMaterial(.{ .lambertian = .{ .albedo = LinearColor.init(0.2, 0.2, 1.0) } });
+    const upper_orange = try scene.createMaterial(.{ .lambertian = .{ .albedo = LinearColor.init(1.0, 0.5, 0.0) } });
+    const lower_teal   = try scene.createMaterial(.{ .lambertian = .{ .albedo = LinearColor.init(0.2, 0.8, 0.8) } });
 
     // Quads
     try scene.add(.{ .quad = Quad.init(
@@ -315,9 +325,9 @@ fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []
     defer scene.deinit();
 
     // Materials
-    const sphere_mat = Material { .lambertian = .{ .albedo = .init(0.7, 0.7, 0.7) } };
-    const ground_mat = Material { .lambertian = .{ .albedo = .init(0.6, 0.6, 0.6) } };
-    const light_mat  = Material { .diffuse_light = .{ .color = .init(4.0, 4.0, 4.0) } };
+    const sphere_mat = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.7, 0.7, 0.7) } });
+    const ground_mat = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.6, 0.6, 0.6) } });
+    const light_mat  = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(4.0, 4.0, 4.0) } });
 
     // Primitives
     try scene.add(.{ .sphere = .init(.{ .x = 0.0, .y = -1000.0, .z = 0.0 }, 1000.0, ground_mat) });
@@ -366,10 +376,10 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     defer scene.deinit();
 
     // Materials
-    const red = Material { .lambertian = .{ .albedo = .init(0.65, 0.05, 0.05) } };
-    const white = Material { .lambertian = .{ .albedo = .init(0.73, 0.73, 0.73) } };
-    const green = Material { .lambertian = .{ .albedo = .init(0.12, 0.45, 0.15) } };
-    const light = Material { .diffuse_light = .{ .color = .init(15.0, 15.0, 15.0) } };
+    const red   = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.65, 0.05, 0.05) } });
+    const white = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.73, 0.73, 0.73) } });
+    const green = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.12, 0.45, 0.15) } });
+    const light = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(15.0, 15.0, 15.0) } });
 
     // Primitives
     try scene.add(.{ .quad = .init(.{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, red) });
@@ -378,8 +388,8 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, white) });
     try scene.add(.{ .quad = .init(.{ .x = 555.0, .y = 555.0, .z = 555.0 }, .{ .x = -555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = -555.0 }, white) });
     try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 555.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, white) });
-    try scene.add(.{ .box = .init(.{ .x = 130.0, .y = 0.0, .z = 65.0 }, .{ .x = 295.0, .y = 165.0, .z = 230.0 }, white) });
-    try scene.add(.{ .box = .init(.{ .x = 265.0, .y = 0.0, .z = 295.0 }, .{ .x = 430.0, .y = 330.0, .z = 460.0 }, white) });
+    try scene.add(.{ .box = try Box.alloc(.{ .x = 130.0, .y = 0.0, .z = 65.0 }, .{ .x = 295.0, .y = 165.0, .z = 230.0 }, white, gpa) });
+    try scene.add(.{ .box = try Box.alloc(.{ .x = 265.0, .y = 0.0, .z = 295.0 }, .{ .x = 430.0, .y = 330.0, .z = 460.0 }, white, gpa) });
 
     try scene.buildBvh(1);
 

@@ -21,7 +21,7 @@ pub const Sphere = struct {
     center: Vec3,
     radius: Float,
     /// Pointer to the `Sphere` material.\
-    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid double frees.
+    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid lifetime issues.
     material: *const Material,
 
     pub fn init(center: Vec3, radius: Float, mat: *const Material) Sphere {
@@ -92,7 +92,7 @@ pub const Quad = struct {
     /// A constant vector for the given quad, useful for constructing a *coordinate frame* for the plane
     /// containing the quad to find the ray-quad intersection point planar coordinates.\
     /// It's equal to **n** / (**n** ⋅ **n**), where **n** is the quad normal vector (before normalization).\
-    /// Treat as **immutable**,
+    /// Treat as **immutable**.
     w: Vec3,
     /// The quad unit normal vector, computed as the cross product between u and v (u x v).\
     /// Treat as **immutable**.
@@ -101,7 +101,7 @@ pub const Quad = struct {
     /// Treat as **immutable**.
     d: Float,
     /// Pointer to the `Quad` material.\
-    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid double frees.
+    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid lifetime issues.
     material: *const Material,
 
     pub fn init(q: Vec3, u: Vec3, v: Vec3, mat: *const Material) Quad {
@@ -167,7 +167,6 @@ pub const Quad = struct {
 // TODO: Fix material ownership: who owns the material, the faces or the box?
 pub const Box = struct {
     /// The box faces.\
-    /// Treat as **immutable**.
     faces: [6]Quad,
 
     /// Initialize a 3D box (six sides) that contains the two opposite vertices a and b
@@ -261,9 +260,11 @@ pub const HitRecord = struct {
     material: *const Material,
     front_face: bool,
 
-    /// Determines a normal vector orientation. The resulting normal will always point against the ray.\
+    /// Determines a normal vector orientation. The resulting normal will always point against the ray.
+    ///
     /// The first tuple field indicates whether the ray hit the outside of the surface (front face, `true`) or the inside of the surface (back face, `false`).\
-    /// The second tuple field contains the oriented normal.\
+    /// The second tuple field contains the oriented normal.
+    ///
     /// **NOTE**: The parameter `outward_normal` is assumed to be normalized.
     pub fn determineNormalOrientation(ray: Ray, outward_normal: Vec3) struct { bool, Vec3 } {
         std.debug.assert(outward_normal.isNormalized());
@@ -381,9 +382,9 @@ pub const Aabb = struct {
 pub const BvhTree = struct {
     nodes: std.ArrayList(BvhNode),
 
-    // A tagged union would be a more idiomatic way of representing leaf vs internal nodes.
-    // We avoid this to grant a size of 32 bytes (2 for the BvhNode u32 fields, 6 for the AABB Interval(f32) fields) for better performance.
-    // Of course, this is only true if the Float type declared in config.zig is f32.
+    /// A tagged union would be a more idiomatic way of representing leaf vs internal nodes.
+    /// We avoid this to grant a size of 32 bytes (2 for the `BvhNode` `u32` fields, 6 for the `Aabb` `Interval(f32)` fields) for better performance.
+    /// Of course, this is only true if the `Float` type declared in config.zig is `f32`.
     pub const BvhNode = struct {
         /// The number of primitives in this node. It's 0 if the node is internal, > 0 if it's a leaf.\
         /// Treat as **immutable**.
@@ -437,7 +438,7 @@ pub const BvhTree = struct {
         var stack: [128]usize = undefined;
         var stack_top: usize = 0;
         var hit_anything = false;
-        var current_t_range: IntervalFloat = ray_t_range;
+        var current_t_range = ray_t_range;
 
         stack[stack_top] = 0;
         stack_top += 1;

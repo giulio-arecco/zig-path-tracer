@@ -189,6 +189,11 @@ pub fn refract(unit_v: Vec3, n: Vec3, etai_over_etat: Float) Vec3 {
     return r_out_perp.add(r_out_parallel);
 }
 
+// ====================================================================================
+// THE FOLLOWING VECTOR FUNCTIONS ARE CURRENTLY NOT UP TO DATE, MEANING
+//  THEY DON'T REFLECT ALL THE FUNCTIONALITY PROVIDED BY THE PREVIOUS FUNCTIONS
+// ====================================================================================
+
 pub fn vectorDot(a: @Vector(3, Float), b: @Vector(3, Float)) Float {
     return @reduce(.Add, a * b);
 }

@@ -16,6 +16,10 @@ const dot = Vec3.dot;
 const cross = Vec3.cross;
 const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
 
+pub const Axis = enum { x, y, z };
+pub const RotatedX = Rotate(.x);
+pub const RotatedY = Rotate(.y);
+pub const RotatedZ = Rotate(.z);
 
 pub const Sphere = struct {
     center: Vec3,
@@ -164,7 +168,6 @@ pub const Quad = struct {
     }
 };
 
-// TODO: Fix material ownership: who owns the material, the faces or the box?
 pub const Box = struct {
     /// The box faces.\
     faces: [6]Quad,
@@ -193,7 +196,7 @@ pub const Box = struct {
 
     /// Allocates and returns a pointer to a 3D box that contains the two opposite vertices a and b.\
     /// The passed allocator should always be the same that's cached in the Scene struct at initialization and later used for deinit.
-    pub fn alloc(a: Vec3, b: Vec3, mat: *const Material, scene_allocator: Allocator) !*Box {
+    pub fn alloc(a: Vec3, b: Vec3, mat: *const Material, scene_allocator: Allocator) Allocator.Error!*Box {
         const box_ptr = try scene_allocator.create(Box);
         box_ptr.* = Box.init(a, b, mat);
         return box_ptr;
@@ -222,11 +225,170 @@ pub const Box = struct {
     }
 };
 
+pub const Translated = struct {
+    /// The `Translated` struct owns the memory referenced by this pointer.
+    object: *Hittable,
+    offset: Vec3,
+
+    pub fn init(object: Hittable, offset: Vec3, scene_allocator: Allocator) Allocator.Error!Translated {
+        const obj_ptr = try scene_allocator.create(Hittable);
+        obj_ptr.* = object;
+
+        return .{
+            .object = obj_ptr,
+            .offset = offset
+        };
+    }
+
+    /// Frees heap allocated memory for a `Translated` struct.\
+    /// The passed allocator should always be the same that's cached in the `Scene` struct at initialization.
+    pub fn deinit(self: *Translated, scene_allocator: Allocator) void {
+        self.object.deinit(scene_allocator);
+        scene_allocator.destroy(self.object);
+        self.* = undefined;
+    }
+
+    pub fn hit(self: Translated, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
+        // Move the ray backwards by the offset
+        const offset_ray = Ray { .origin = ray.origin.sub(self.offset), .dir = ray.dir };
+
+        // Determine whether an intersection exists along the offset ray (and if so, where)
+        if (!self.object.hit(offset_ray, ray_t_range, hit_record)) {
+            return false;
+        }
+
+        // Move the intersection point forward by the offset
+        hit_record.point = hit_record.point.add(self.offset);
+        return true;
+    }
+
+    pub fn bbox(self: Translated) Aabb {
+        const obj_bbox = self.object.bbox();
+        return .{
+            .x = .{ .min = obj_bbox.x.min + self.offset.x, .max = obj_bbox.x.max + self.offset.x },
+            .y = .{ .min = obj_bbox.y.min + self.offset.y, .max = obj_bbox.y.max + self.offset.y },
+            .z = .{ .min = obj_bbox.z.min + self.offset.z, .max = obj_bbox.z.max + self.offset.z },
+        };
+    }
+};
+
+pub fn Rotate(comptime axis: Axis) type {
+    return struct {
+        const Self = @This();
+
+        /// The `Rotate` struct owns the memory referenced by this pointer.
+        object: *Hittable,
+        sin_theta: Float,
+        cos_theta: Float,
+
+        pub fn init(object: Hittable, degrees: Float, scene_allocator: Allocator) Allocator.Error!Self {
+            const radians: Float = std.math.degreesToRadians(degrees);
+
+            const obj_ptr = try scene_allocator.create(Hittable);
+            obj_ptr.* = object;
+
+            return .{
+                .object = obj_ptr,
+                .sin_theta = @sin(radians),
+                .cos_theta = @cos(radians)
+            };
+        }
+
+        /// Frees heap allocated memory for a `Rotate` struct.\
+        /// The passed allocator should always be the same that's cached in the `Scene` struct at initialization.
+        pub fn deinit(self: *Self, scene_allocator: Allocator) void {
+            self.object.deinit(scene_allocator);
+            scene_allocator.destroy(self.object);
+            self.* = undefined;
+        }
+
+        pub fn hit(self: Self, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
+            const sin_theta = self.sin_theta;
+            const cos_theta = self.cos_theta;
+
+            // Transform the ray from world space to object space (rotate it by -theta)
+            const rotated_ray = Ray {
+                .origin = rotate(ray.origin, -sin_theta, cos_theta),
+                .dir = rotate(ray.dir, -sin_theta, cos_theta)
+            };
+
+            // Determine whether an intersection exists in object space (and if so, where).
+            if (!self.object.hit(rotated_ray, ray_t_range, hit_record)) {
+                return false;
+            }
+
+            // Transform the intersection from object space back to world space.
+            hit_record.point = rotate(hit_record.point, sin_theta, cos_theta);
+            hit_record.normal = rotate(hit_record.normal, sin_theta, cos_theta);
+            return true;
+        }
+
+        pub fn bbox(self: Self) Aabb {
+            const sin_theta = self.sin_theta;
+            const cos_theta = self.cos_theta;
+
+            var min = Vec3 { .x = std.math.inf(Float), .y= std.math.inf(Float), .z = std.math.inf(Float) };
+            var max = Vec3 { .x = -std.math.inf(Float), .y= -std.math.inf(Float), .z = -std.math.inf(Float) };
+            const obj_bbox = self.object.bbox();
+
+            for (0..2) |i| {
+                for (0..2) |j| {
+                    for (0..2) |k| {
+                        const float_i = @as(Float, @floatFromInt(i));
+                        const float_j = @as(Float, @floatFromInt(j));
+                        const float_k = @as(Float, @floatFromInt(k));
+
+                        const x = float_i * obj_bbox.x.max + (1.0 - float_i) * obj_bbox.x.min;
+                        const y = float_j * obj_bbox.y.max + (1.0 - float_j) * obj_bbox.y.min;
+                        const z = float_k * obj_bbox.z.max + (1.0 - float_k) * obj_bbox.z.min;
+
+                        const tester = rotate(.{ .x = x, .y = y, .z = z }, sin_theta, cos_theta);
+
+                        min.x = @min(min.x, tester.x);
+                        min.y = @min(min.y, tester.y);
+                        min.z = @min(min.z, tester.z);
+
+                        max.x = @max(max.x, tester.x);
+                        max.y = @max(max.y, tester.y);
+                        max.z = @max(max.z, tester.z);
+                    }
+                }
+            }
+
+            return .initFromPoints(min, max);
+        }
+
+        fn rotate(v: Vec3, sin_theta: Float, cos_theta: Float) Vec3 {
+            switch (axis) {
+                .x => return .{
+                    .x = v.x,
+                    .y = cos_theta * v.y - sin_theta * v.z,
+                    .z = sin_theta * v.y + cos_theta * v.z
+                },
+                .y => return .{
+                    .x = cos_theta * v.x + sin_theta * v.z,
+                    .y = v.y,
+                    .z = -sin_theta * v.x + cos_theta * v.z
+                },
+                .z => return .{
+                    .x = cos_theta * v.x - sin_theta * v.y,
+                    .y = sin_theta * v.x + cos_theta * v.z,
+                    .z = v.z
+                },
+            }
+        }
+    };
+}
+
 pub const Hittable = union(enum) {
     sphere: Sphere,
     quad: Quad,
     /// Box, owned by the Hittable union.
     box: *const Box,
+    translated: Translated,
+    rotated_x: RotatedX,
+    rotated_y: RotatedY,
+    rotated_z: RotatedZ,
 
     pub fn hit(self: Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         switch (self) {
@@ -240,15 +402,44 @@ pub const Hittable = union(enum) {
         }
     }
 
-    /// Frees heap allocated memory for a Hittable union.\
-    /// The passed allocator should always be the same that's cached in the Scene struct at initialization.
+    /// Frees heap allocated memory for a `Hittable` union.\
+    /// The passed allocator should always be the same that's cached in the `Scene` struct at initialization.
     pub fn deinit(self: *Hittable, scene_allocator: Allocator) void {
         switch(self.*) {
-            .box => |box| scene_allocator.destroy(box),
+            .box => |b| scene_allocator.destroy(b),
+            inline .translated, .rotated_x, .rotated_y, .rotated_z => |*t| t.deinit(scene_allocator),
             else => {}
         }
 
         self.* = undefined;
+    }
+
+    pub fn createSphere(center: Vec3, radius: Float, mat: *const Material) Hittable {
+        return .{ .sphere = .init(center, radius, mat) };
+    }
+
+    pub fn createQuad(q: Vec3, u: Vec3, v: Vec3, mat: *const Material) Hittable {
+        return .{ .quad = .init(q, u, v, mat) };
+    }
+
+    pub fn createBox(a: Vec3, b: Vec3, mat: *const Material, scene_allocator: Allocator) Allocator.Error!Hittable {
+        return .{ .box = try Box.alloc(a, b, mat, scene_allocator) };
+    }
+
+    pub fn translate(object: Hittable, offset: Vec3, scene_allocator: Allocator) Allocator.Error!Hittable {
+        return .{ .translated = try .init(object, offset, scene_allocator) };
+    }
+
+    pub fn rotateX(object: Hittable, degrees: Float, scene_allocator: Allocator) Allocator.Error!Hittable {
+        return .{ .rotated_x = try RotatedX.init(object, degrees, scene_allocator) };
+    }
+
+    pub fn rotateY(object: Hittable, degrees: Float, scene_allocator: Allocator) Allocator.Error!Hittable {
+        return .{ .rotated_y = try RotatedY.init(object, degrees, scene_allocator) };
+    }
+
+    pub fn rotateZ(object: Hittable, degrees: Float, scene_allocator: Allocator) Allocator.Error!Hittable {
+        return .{ .rotated_z = try RotatedZ.init(object, degrees, scene_allocator) };
     }
 };
 
@@ -1175,4 +1366,168 @@ test "Hittable.deinit" {
     const box_ptr = try Box.alloc(Vec3{ .x = -5.0, .y = -5.0, .z = -5.0 }, Vec3{ .x = 5.0, .y = 5.0, .z = 5.0 }, &test_material, testing.allocator);
     var box_hittable = Hittable{ .box = box_ptr };
     box_hittable.deinit(testing.allocator);
+}
+
+test "Translated.init and deinit" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const hittable_sphere = Hittable{ .sphere = sphere };
+
+    var trans = try Translated.init(hittable_sphere, Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 }, testing.allocator);
+    defer trans.deinit(testing.allocator);
+
+    try testing.expectApproxEqAbs(@as(Float, 1.0), trans.offset.x, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 2.0), trans.offset.y, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 3.0), trans.offset.z, absEps);
+}
+
+test "Translated.hit" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    // Sphere at origin
+    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const hittable_sphere = Hittable{ .sphere = sphere };
+
+    // Translate sphere to (0, 0, -5)
+    var trans = try Translated.init(hittable_sphere, Vec3{ .x = 0.0, .y = 0.0, .z = -5.0 }, testing.allocator);
+    defer trans.deinit(testing.allocator);
+
+    // Ray passing through origin, heading -Z
+    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = trans.hit(ray, ray_t_range, &h);
+    try testing.expect(hit);
+
+    if (hit) {
+        // Hit occurs at t=4.0
+        try testing.expectApproxEqRel(@as(Float, 4.0), h.t, relEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.y, absEps);
+        try testing.expectApproxEqRel(@as(Float, -4.0), h.point.z, relEps);
+
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.y, absEps);
+        try testing.expectApproxEqRel(@as(Float, 1.0), h.normal.z, relEps);
+    }
+}
+
+test "Translated.bbox" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const hittable_sphere = Hittable{ .sphere = sphere };
+
+    var trans = try Translated.init(hittable_sphere, Vec3{ .x = 5.0, .y = 10.0, .z = -15.0 }, testing.allocator);
+    defer trans.deinit(testing.allocator);
+
+    const bbox = trans.bbox();
+    try testing.expectApproxEqAbs(@as(Float, 4.0), bbox.x.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 6.0), bbox.x.max, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 9.0), bbox.y.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, 11.0), bbox.y.max, absEps);
+    try testing.expectApproxEqAbs(@as(Float, -16.0), bbox.z.min, absEps);
+    try testing.expectApproxEqAbs(@as(Float, -14.0), bbox.z.max, absEps);
+}
+
+test "Rotate.init and deinit" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const hittable_sphere = Hittable{ .sphere = sphere };
+
+    var rot = try RotatedY.init(hittable_sphere, 90.0, testing.allocator);
+    defer rot.deinit(testing.allocator);
+
+    try testing.expectApproxEqAbs(@as(Float, 1.0), rot.sin_theta, absEps);
+    // cos(90) in floats can be tiny but non-zero, check approx
+    try testing.expectApproxEqAbs(@as(Float, 0.0), rot.cos_theta, absEps);
+}
+
+test "Rotate.hit" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+
+    // Quad on XY plane from x=1 to 3, y=0 to 2
+    const quad = Quad.init(Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 }, &test_material);
+    const hittable_quad = Hittable{ .quad = quad };
+
+    // Rotate -90 degrees around Y (x goes to -z)
+    var rot = try RotatedY.init(hittable_quad, -90.0, testing.allocator);
+    defer rot.deinit(testing.allocator);
+
+    // The quad which used to be at Z=0 and spanning X=[1,3] is now rotated around Y by -90:
+    // This places it perfectly on the X=0 plane, spanning Z=[1,3].
+    // Ray heading into -X, intersecting the rotated quad perpendicularly
+    const ray = Ray{ .origin = .{ .x = 5.0, .y = 1.0, .z = 2.0 }, .dir = .{ .x = -1.0, .y = 0.0, .z = 0.0 } };
+    const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
+
+    var h: HitRecord = undefined;
+    const hit = rot.hit(ray, ray_t_range, &h);
+    try testing.expect(hit);
+
+    if (hit) {
+        // Intersects x=0.0, which means distance is 5.0
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.point.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 1.0), h.point.y, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 2.0), h.point.z, absEps);
+        // Original outward normal is +Z. Rotated -90Y -> -X.
+        // Ray dir is -X, so ray hits the back face. HitRecord flips the normal to point against the ray (+X).
+        try testing.expectApproxEqAbs(@as(Float, 1.0), h.normal.x, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.y, absEps);
+        try testing.expectApproxEqAbs(@as(Float, 0.0), h.normal.z, absEps);
+    }
+}
+
+test "Rotate.bbox" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+    // Box 1x1x1 at origin [0,1]
+    const box_ptr = try Box.alloc(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }, &test_material, testing.allocator);
+    const hittable_box = Hittable{ .box = box_ptr };
+
+    // Rotate 45 deg around Z
+    var rot = try RotatedZ.init(hittable_box, 45.0, testing.allocator);
+    defer rot.deinit(testing.allocator);
+
+    const bbox = rot.bbox();
+    const box_eps: Float = 0.001;
+
+    const root2_over_2 = @sqrt(@as(Float, 2.0)) / 2.0;
+    try testing.expectApproxEqAbs(@as(Float, -root2_over_2), bbox.x.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, root2_over_2), bbox.x.max, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 0.0), bbox.y.min, box_eps);
+    try testing.expectApproxEqAbs(@as(Float, 2.0 * root2_over_2), bbox.y.max, box_eps);
+}
+
+test "Hittable builder functions" {
+    const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
+
+    // createSphere
+    var s = Hittable.createSphere(Vec3{.x = 0, .y = 0, .z = 0}, 1.0, &test_material);
+    try testing.expect(std.meta.activeTag(s) == .sphere);
+    s.deinit(testing.allocator);
+
+    // createQuad
+    var q = Hittable.createQuad(Vec3{.x = 0, .y = 0, .z = 0}, Vec3{.x = 1, .y = 0, .z = 0}, Vec3{.x = 0, .y = 1, .z = 0}, &test_material);
+    try testing.expect(std.meta.activeTag(q) == .quad);
+    q.deinit(testing.allocator);
+
+    // createBox (allocates)
+    var b = try Hittable.createBox(Vec3{.x = -1, .y = -1, .z = -1}, Vec3{.x = 1, .y = 1, .z = 1}, &test_material, testing.allocator);
+    try testing.expect(std.meta.activeTag(b) == .box);
+    b.deinit(testing.allocator);
+
+    // translate, rotate (allocate interior Hittable pointer)
+    var t = try Hittable.translate(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), Vec3{.x=1,.y=1,.z=1}, testing.allocator);
+    try testing.expect(std.meta.activeTag(t) == .translated);
+    t.deinit(testing.allocator);
+
+    var rx = try Hittable.rotateX(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), 45.0, testing.allocator);
+    try testing.expect(std.meta.activeTag(rx) == .rotated_x);
+    rx.deinit(testing.allocator);
+
+    var ry = try Hittable.rotateY(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), 45.0, testing.allocator);
+    try testing.expect(std.meta.activeTag(ry) == .rotated_y);
+    ry.deinit(testing.allocator);
+
+    var rz = try Hittable.rotateZ(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), 45.0, testing.allocator);
+    try testing.expect(std.meta.activeTag(rz) == .rotated_z);
+    rz.deinit(testing.allocator);
 }

@@ -504,15 +504,15 @@ pub const Aabb = struct {
     /// - 0 corresponds to x
     /// - 1 corresponds to y
     /// - 2 correspond to z
-    pub fn longest_axis(self: Aabb) u8 {
+    pub fn longest_axis(self: Aabb) Axis {
         const x_size = self.x.size();
         const y_size = self.y.size();
         const z_size = self.z.size();
 
         if (x_size > y_size) {
-            return if (x_size > z_size) 0 else 2;
+            return if (x_size > z_size) .x else .z;
         }
-        else return if (y_size > z_size) 1 else 2;
+        else return if (y_size > z_size) .y else .z;
     }
 
     pub fn hit(self: Aabb, ray: Ray, ray_t_range: IntervalFloat) ?IntervalFloat {
@@ -589,7 +589,7 @@ pub const BvhTree = struct {
     };
 
     const SortContext = struct {
-        axis_id: u8,
+        axis: Axis,
         hittables: []Hittable
     };
 
@@ -696,20 +696,19 @@ pub const BvhTree = struct {
         var lhs_axis_interval: IntervalFloat = undefined;
         var rhs_axis_interval: IntervalFloat = undefined;
 
-        switch (ctx.axis_id) {
-            0 => {
+        switch (ctx.axis) {
+            .x => {
                 lhs_axis_interval = ctx.hittables[lhs].bbox().x;
                 rhs_axis_interval = ctx.hittables[rhs].bbox().x;
             },
-            1 => {
+            .y => {
                 lhs_axis_interval = ctx.hittables[lhs].bbox().y;
                 rhs_axis_interval = ctx.hittables[rhs].bbox().y;
             },
-            2 => {
+            .z => {
                 lhs_axis_interval = ctx.hittables[lhs].bbox().z;
                 rhs_axis_interval = ctx.hittables[rhs].bbox().z;
-            },
-            else => unreachable
+            }
         }
 
 
@@ -744,8 +743,8 @@ pub const BvhTree = struct {
 
         // Splitting along the longest axis is a continuous computational shortcut to roughly minimize the surface area
         // of child nodes, which statistically bounds and reduces the probability of a random ray intersecting them.
-        const axis_id = bbox.longest_axis();
-        std.mem.sortUnstable(usize, indices, SortContext{ .axis_id = axis_id, .hittables = hittables }, lessThanIndicesBBox);
+        const axis = bbox.longest_axis();
+        std.mem.sortUnstable(usize, indices, SortContext{ .axis = axis, .hittables = hittables }, lessThanIndicesBBox);
 
         const mid = range_len / 2;
         const left_idx = try self.buildBvhNode(hittables, indices[0..mid], offset, min_node_size, allocator);
@@ -1116,13 +1115,13 @@ test "AABB.hit - ray parallel to axis (missing)" {
 
 test "Aabb.longest_axis" {
     const bbox_x = Aabb.initFromPoints(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 10.0, .y = 2.0, .z = 1.0 });
-    try testing.expectEqual(@as(u8, 0), bbox_x.longest_axis());
+    try testing.expectEqual(.x, bbox_x.longest_axis());
 
     const bbox_y = Aabb.initFromPoints(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 2.0, .y = 10.0, .z = 1.0 });
-    try testing.expectEqual(@as(u8, 1), bbox_y.longest_axis());
+    try testing.expectEqual(.y, bbox_y.longest_axis());
 
     const bbox_z = Aabb.initFromPoints(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 2.0, .y = 1.0, .z = 10.0 });
-    try testing.expectEqual(@as(u8, 2), bbox_z.longest_axis());
+    try testing.expectEqual(.z, bbox_z.longest_axis());
 }
 
 test "BvhTree.init and BvhTree.deinit" {

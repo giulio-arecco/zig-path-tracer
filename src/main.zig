@@ -11,6 +11,7 @@ const Vec3 = @import("Vec3.zig");
 const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
+const Hittable = graphics.scene_3d.geometry.Hittable;
 const Sphere = graphics.scene_3d.geometry.Sphere;
 const Quad = graphics.scene_3d.geometry.Quad;
 const Box = graphics.scene_3d.geometry.Box;
@@ -388,8 +389,16 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, white) });
     try scene.add(.{ .quad = .init(.{ .x = 555.0, .y = 555.0, .z = 555.0 }, .{ .x = -555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = -555.0 }, white) });
     try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 555.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, white) });
-    try scene.add(.{ .box = try Box.alloc(.{ .x = 130.0, .y = 0.0, .z = 65.0 }, .{ .x = 295.0, .y = 165.0, .z = 230.0 }, white, gpa) });
-    try scene.add(.{ .box = try Box.alloc(.{ .x = 265.0, .y = 0.0, .z = 295.0 }, .{ .x = 430.0, .y = 330.0, .z = 460.0 }, white, gpa) });
+
+    var box1 = try Hittable.createBox(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 165.0, .y = 330.0, .z = 165.0 }, white, gpa);
+    box1 = try box1.rotateY(15.0, gpa);
+    box1 = try box1.translate(.{ .x = 265.0, .y = 0.0, .z = 295.0 }, gpa);
+    try scene.add(box1);
+
+    var box2 = try Hittable.createBox(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 165.0, .y = 165.0, .z = 165.0 }, white, gpa);
+    box2 = try box2.rotateY(-18.0, gpa);
+    box2 = try box2.translate(.{ .x = 130.0, .y = 0.0, .z = 65.0 }, gpa);
+    try scene.add(box2);
 
     try scene.buildBvh(1);
 

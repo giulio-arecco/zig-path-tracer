@@ -78,7 +78,7 @@ pub const Sphere = struct {
     }
 
     pub fn bbox(self: Sphere) Aabb {
-        const radius_vec = Vec3 { .x = self.radius, .y = self.radius, .z = self.radius };
+        const radius_vec = Vec3.init(self.radius, self.radius, self.radius);
         return Aabb.initFromPoints(self.center.sub(radius_vec), self.center.add(radius_vec));
     }
 };
@@ -169,24 +169,24 @@ pub const Quad = struct {
 };
 
 pub const Box = struct {
-    /// The box faces.\
+    /// The box faces.
     faces: [6]Quad,
 
     /// Initialize a 3D box (six sides) that contains the two opposite vertices a and b
     pub fn init(a: Vec3, b: Vec3, mat: *const Material) Box {
-        const min = Vec3 { .x = @min(a.x, b.x), .y = @min(a.y, b.y), .z = @min(a.z, b.z) };
-        const max = Vec3 { .x = @max(a.x, b.x), .y = @max(a.y, b.y), .z = @max(a.z, b.z) };
+        const min = Vec3.init(@min(a.x, b.x), @min(a.y, b.y), @min(a.z, b.z));
+        const max = Vec3.init(@max(a.x, b.x), @max(a.y, b.y), @max(a.z, b.z));
 
-        const dx = Vec3 { .x = max.x - min.x, .y = 0.0, .z = 0.0 };
-        const dy = Vec3 { .x = 0.0, .y = max.y - min.y, .z = 0.0 };
-        const dz = Vec3 { .x = 0.0, .y = 0.0, .z = max.z - min.z };
+        const dx = Vec3.init(max.x - min.x, 0.0, 0.0);
+        const dy = Vec3.init(0.0, max.y - min.y, 0.0);
+        const dz = Vec3.init(0.0, 0.0, max.z - min.z);
 
-        const front  = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dy, dx, mat);
-        const right  = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dz, dy, mat);
-        const back   = Quad.init(.{ .x = min.x, .y = min.y, .z = max.z }, dx, dy, mat);
-        const left   = Quad.init(.{ .x = max.x, .y = min.y, .z = min.z }, dy, dz, mat);
-        const top    = Quad.init(.{ .x = min.x, .y = max.y, .z = min.z }, dz, dx, mat);
-        const bottom = Quad.init(.{ .x = min.x, .y = min.y, .z = min.z }, dx, dz, mat);
+        const front  = Quad.init(.init(min.x, min.y, min.z), dy, dx, mat);
+        const right  = Quad.init(.init(min.x, min.y, min.z), dz, dy, mat);
+        const back   = Quad.init(.init(min.x, min.y, max.z), dx, dy, mat);
+        const left   = Quad.init(.init(max.x, min.y, min.z), dy, dz, mat);
+        const top    = Quad.init(.init(min.x, max.y, min.z), dz, dx, mat);
+        const bottom = Quad.init(.init(min.x, min.y, min.z), dx, dz, mat);
         const faces = [6]Quad { front, right, back, left, top, bottom };
 
         return .{
@@ -327,8 +327,8 @@ pub fn Rotate(comptime axis: Axis) type {
             const sin_theta = self.sin_theta;
             const cos_theta = self.cos_theta;
 
-            var min = Vec3 { .x = std.math.inf(Float), .y= std.math.inf(Float), .z = std.math.inf(Float) };
-            var max = Vec3 { .x = -std.math.inf(Float), .y= -std.math.inf(Float), .z = -std.math.inf(Float) };
+            var min = Vec3.init(std.math.inf(Float), std.math.inf(Float), std.math.inf(Float));
+            var max = Vec3.init(-std.math.inf(Float), -std.math.inf(Float), -std.math.inf(Float));
             const obj_bbox = self.object.bbox();
 
             for (0..2) |i| {
@@ -342,7 +342,7 @@ pub fn Rotate(comptime axis: Axis) type {
                         const y = float_j * obj_bbox.y.max + (1.0 - float_j) * obj_bbox.y.min;
                         const z = float_k * obj_bbox.z.max + (1.0 - float_k) * obj_bbox.z.min;
 
-                        const tester = rotate(.{ .x = x, .y = y, .z = z }, sin_theta, cos_theta);
+                        const tester = rotate(.init(x, y, z), sin_theta, cos_theta);
 
                         min.x = @min(min.x, tester.x);
                         min.y = @min(min.y, tester.y);
@@ -662,8 +662,8 @@ pub const BvhTree = struct {
                 // Internal node
                 const left_bbox = self.nodes.items[node_idx + 1].bbox;
                 const right_bbox = self.nodes.items[node.first_or_right_index].bbox;
-                const left_bbox_point = Vec3 { .x = left_bbox.x.min, .y = left_bbox.y.min, .z = left_bbox.z.min };
-                const right_bbox_point = Vec3 { .x = right_bbox.x.min, .y = right_bbox.y.min, .z = right_bbox.z.min };
+                const left_bbox_point = Vec3.init(left_bbox.x.min, left_bbox.y.min, left_bbox.z.min);
+                const right_bbox_point = Vec3.init(right_bbox.x.min, right_bbox.y.min, right_bbox.z.min);
 
                 const ray_orig_to_left_bbox = Vec3.squaredDistance(left_bbox_point, ray.origin);
                 const ray_orig_to_right_bbox = Vec3.squaredDistance(right_bbox_point, ray.origin);
@@ -766,7 +766,7 @@ const relEps = @sqrt(std.math.floatEps(Float));
 
 test "Sphere.init" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const center = Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 };
+    const center = Vec3.init(1.0, 2.0, 3.0);
     const radius: Float = 4.0;
     const sphere = Sphere.init(center, radius, &test_material);
 
@@ -785,11 +785,11 @@ test "Sphere.init" {
 
 test "Sphere.hit - ray hits sphere" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const center = Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 };
+    const center = Vec3.init(0.0, 0.0, -10.0);
     const radius: Float = 2.0;
     const sphere = Sphere.init(center, radius, &test_material);
 
-    const ray = Ray { .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray { .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat { .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -811,11 +811,11 @@ test "Sphere.hit - ray hits sphere" {
 
 test "Sphere.hit - ray misses sphere" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const center = Vec3 { .x = 5.0, .y = 5.0, .z = -10.0 };
+    const center = Vec3.init(5.0, 5.0, -10.0);
     const radius: Float = 2.0;
     const sphere = Sphere.init(center, radius, &test_material);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat { .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -825,11 +825,11 @@ test "Sphere.hit - ray misses sphere" {
 
 test "Sphere.hit - ray hits sphere from inside" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const center = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
+    const center = Vec3.init(0.0, 0.0, 0.0);
     const radius: Float = 5.0;
     const sphere = Sphere.init(center, radius, &test_material);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat { .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -853,11 +853,11 @@ test "Sphere.hit - ray hits sphere from inside" {
 
 test "Sphere.hit - hit outside range" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const center = Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 };
+    const center = Vec3.init(0.0, 0.0, -10.0);
     const radius: Float = 2.0;
     const sphere = Sphere.init(center, radius, &test_material);
 
-    const ray = Ray{ .origin = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = Vec3.init(0.0, 0.0, 0.0), .dir = Vec3.init(0.0, 0.0, -1.0) };
     // The hit occurs at t=8.0. Set max < 8.0
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 5.0 };
 
@@ -868,7 +868,7 @@ test "Sphere.hit - hit outside range" {
 
 test "Sphere.bbox" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const center = Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 };
+    const center = Vec3.init(1.0, 2.0, 3.0);
     const radius: Float = 4.0;
     const sphere = Sphere.init(center, radius, &test_material);
 
@@ -883,9 +883,9 @@ test "Sphere.bbox" {
 
 test "Quad.init" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const q = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
-    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
-    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const q = Vec3.init(0.0, 0.0, 0.0);
+    const u = Vec3.init(2.0, 0.0, 0.0);
+    const v = Vec3.init(0.0, 2.0, 0.0);
     const quad = Quad.init(q, u, v, &test_material);
 
     try testing.expectApproxEqAbs(0.0, quad.q.x, absEps);
@@ -903,12 +903,12 @@ test "Quad.init" {
 
 test "Quad.hit - ray hits quad" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const q = Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 };
-    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
-    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const q = Vec3.init(-1.0, -1.0, -5.0);
+    const u = Vec3.init(2.0, 0.0, 0.0);
+    const v = Vec3.init(0.0, 2.0, 0.0);
     const quad = Quad.init(q, u, v, &test_material);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -930,13 +930,13 @@ test "Quad.hit - ray hits quad" {
 
 test "Quad.hit - ray misses quad" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const q = Vec3{ .x = 2.0, .y = 2.0, .z = -5.0 };
-    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
-    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const q = Vec3.init(2.0, 2.0, -5.0);
+    const u = Vec3.init(2.0, 0.0, 0.0);
+    const v = Vec3.init(0.0, 2.0, 0.0);
     const quad = Quad.init(q, u, v, &test_material);
 
     // Ray goes straight down Z through origin, quad is shifted to x,y > 2
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -946,13 +946,13 @@ test "Quad.hit - ray misses quad" {
 
 test "Quad.hit - ray parallel to quad" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const q = Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 };
-    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
-    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const q = Vec3.init(-1.0, -1.0, -5.0);
+    const u = Vec3.init(2.0, 0.0, 0.0);
+    const v = Vec3.init(0.0, 2.0, 0.0);
     const quad = Quad.init(q, u, v, &test_material);
 
     // Ray is parallel to the quad (moves along X axis)
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = -2.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, -2.0), .dir = .init(1.0, 0.0, 0.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -962,9 +962,9 @@ test "Quad.hit - ray parallel to quad" {
 
 test "Quad.bbox" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const q = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
-    const u = Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 };
-    const v = Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 };
+    const q = Vec3.init(0.0, 0.0, 0.0);
+    const u = Vec3.init(2.0, 0.0, 0.0);
+    const v = Vec3.init(0.0, 2.0, 0.0);
     const quad = Quad.init(q, u, v, &test_material);
 
     const bbox = quad.bbox();
@@ -978,10 +978,10 @@ test "Quad.bbox" {
 }
 
 test "HitRecord.determineNormalOrientation" {
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(1.0, 0.0, 0.0) };
 
     // Front face: outward normal points against ray
-    const norm_front = Vec3{ .x = -1.0, .y = 0.0, .z = 0.0 };
+    const norm_front = Vec3.init(-1.0, 0.0, 0.0);
     const res_front = HitRecord.determineNormalOrientation(ray, norm_front);
     try testing.expect(res_front[0] == true);
     try testing.expectApproxEqRel(@as(Float, -1.0), res_front[1].x, relEps);
@@ -989,7 +989,7 @@ test "HitRecord.determineNormalOrientation" {
     try testing.expectApproxEqAbs(@as(Float, 0.0), res_front[1].z, absEps);
 
     // Back face: outward normal points in same direction as ray
-    const norm_back = Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 };
+    const norm_back = Vec3.init(1.0, 0.0, 0.0);
     const res_back = HitRecord.determineNormalOrientation(ray, norm_back);
     try testing.expect(res_back[0] == false);
     try testing.expectApproxEqRel(@as(Float, -1.0), res_back[1].x, relEps);
@@ -998,8 +998,8 @@ test "HitRecord.determineNormalOrientation" {
 }
 
 test "HitRecord.determineNormalOrientation - perpendicular" {
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
-    const norm_perp = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(1.0, 0.0, 0.0) };
+    const norm_perp = Vec3.init(0.0, 1.0, 0.0);
     const res_perp = HitRecord.determineNormalOrientation(ray, norm_perp);
     try testing.expect(res_perp[0] == false); // dot is 0.0
     try testing.expectApproxEqAbs(@as(Float, 0.0), res_perp[1].x, absEps);
@@ -1008,8 +1008,8 @@ test "HitRecord.determineNormalOrientation - perpendicular" {
 }
 
 test "AABB.initFromPoints" {
-    const p1 = Vec3{ .x = 1.0, .y = 5.0, .z = -2.0 };
-    const p2 = Vec3{ .x = 4.0, .y = 2.0, .z = 8.0 };
+    const p1 = Vec3.init(1.0, 5.0, -2.0);
+    const p2 = Vec3.init(4.0, 2.0, 8.0);
 
     const bbox = Aabb.initFromPoints(p1, p2);
     try testing.expectApproxEqAbs(1.0, bbox.x.min, absEps);
@@ -1022,12 +1022,12 @@ test "AABB.initFromPoints" {
 
 test "AABB.initMergeTwo" {
     const b1 = Aabb.initFromPoints(
-        Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 },
-        Vec3{ .x = 3.0, .y = 3.0, .z = 3.0 }
+        Vec3.init(1.0, 1.0, 1.0),
+        Vec3.init(3.0, 3.0, 3.0)
     );
     const b2 = Aabb.initFromPoints(
-        Vec3{ .x = 2.0, .y = 0.0, .z = 2.0 },
-        Vec3{ .x = 4.0, .y = 4.0, .z = 4.0 }
+        Vec3.init(2.0, 0.0, 2.0),
+        Vec3.init(4.0, 4.0, 4.0)
     );
 
     const merged = Aabb.initMergeTwo(b1, b2);
@@ -1041,10 +1041,10 @@ test "AABB.initMergeTwo" {
 
 test "AABB.hit - ray hits AABB" {
     const bbox = Aabb.initFromPoints(
-        Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 },
-        Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }
+        Vec3.init(-1.0, -1.0, -1.0),
+        Vec3.init(1.0, 1.0, 1.0)
     );
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 5.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     const hit_interval = bbox.hit(ray, ray_t_range);
@@ -1057,10 +1057,10 @@ test "AABB.hit - ray hits AABB" {
 
 test "AABB.hit - ray misses AABB" {
     const bbox = Aabb.initFromPoints(
-        Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 },
-        Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }
+        Vec3.init(-1.0, -1.0, -1.0),
+        Vec3.init(1.0, 1.0, 1.0)
     );
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 5.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 5.0, 5.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     const hit_interval = bbox.hit(ray, ray_t_range);
@@ -1069,10 +1069,10 @@ test "AABB.hit - ray misses AABB" {
 
 test "AABB.hit - ray originates inside AABB" {
     const bbox = Aabb.initFromPoints(
-        Vec3{ .x = -2.0, .y = -2.0, .z = -2.0 },
-        Vec3{ .x = 2.0, .y = 2.0, .z = 2.0 }
+        Vec3.init(-2.0, -2.0, -2.0),
+        Vec3.init(2.0, 2.0, 2.0)
     );
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(1.0, 0.0, 0.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     const hit_interval = bbox.hit(ray, ray_t_range);
@@ -1085,11 +1085,11 @@ test "AABB.hit - ray originates inside AABB" {
 
 test "AABB.hit - ray parallel to axis (intersecting)" {
     const bbox = Aabb.initFromPoints(
-        Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 },
-        Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }
+        Vec3.init(-1.0, -1.0, -1.0),
+        Vec3.init(1.0, 1.0, 1.0)
     );
     // Ray is parallel to Y and Z axes (dir.y = 0, dir.z = 0)
-    const ray = Ray{ .origin = .{ .x = -5.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(-5.0, 0.0, 0.0), .dir = .init(1.0, 0.0, 0.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     const hit_interval = bbox.hit(ray, ray_t_range);
@@ -1102,11 +1102,11 @@ test "AABB.hit - ray parallel to axis (intersecting)" {
 
 test "AABB.hit - ray parallel to axis (missing)" {
     const bbox = Aabb.initFromPoints(
-        Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 },
-        Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }
+        Vec3.init(-1.0, -1.0, -1.0),
+        Vec3.init(1.0, 1.0, 1.0)
     );
     // Ray is parallel to Y and Z axes, but misses because its origin is off
-    const ray = Ray{ .origin = .{ .x = -5.0, .y = 3.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(-5.0, 3.0, 0.0), .dir = .init(1.0, 0.0, 0.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     const hit_interval = bbox.hit(ray, ray_t_range);
@@ -1114,22 +1114,22 @@ test "AABB.hit - ray parallel to axis (missing)" {
 }
 
 test "Aabb.longest_axis" {
-    const bbox_x = Aabb.initFromPoints(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 10.0, .y = 2.0, .z = 1.0 });
+    const bbox_x = Aabb.initFromPoints(Vec3.init(0.0, 0.0, 0.0), Vec3.init(10.0, 2.0, 1.0));
     try testing.expectEqual(.x, bbox_x.longest_axis());
 
-    const bbox_y = Aabb.initFromPoints(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 2.0, .y = 10.0, .z = 1.0 });
+    const bbox_y = Aabb.initFromPoints(Vec3.init(0.0, 0.0, 0.0), Vec3.init(2.0, 10.0, 1.0));
     try testing.expectEqual(.y, bbox_y.longest_axis());
 
-    const bbox_z = Aabb.initFromPoints(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 2.0, .y = 1.0, .z = 10.0 });
+    const bbox_z = Aabb.initFromPoints(Vec3.init(0.0, 0.0, 0.0), Vec3.init(2.0, 1.0, 10.0));
     try testing.expectEqual(.z, bbox_z.longest_axis());
 }
 
 test "BvhTree.init and BvhTree.deinit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 10.0, .z = 0.0 }, 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(10.0, 0.0, 0.0), 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(0.0, 10.0, 0.0), 1.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
@@ -1142,14 +1142,14 @@ test "BvhTree.init and BvhTree.deinit" {
 test "BvhTree.hit - hit something" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 }, 2.0, &test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(0.0, 0.0, -10.0), 2.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(10.0, 0.0, 0.0), 1.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
     defer bvh.deinit(testing.allocator);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1163,14 +1163,14 @@ test "BvhTree.hit - hit something" {
 test "BvhTree.hit - miss everything" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 10.0, .y = 0.0, .z = -10.0 }, 2.0, &test_material) },
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = -10.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(10.0, 0.0, -10.0), 2.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(-10.0, 0.0, 0.0), 1.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
     defer bvh.deinit(testing.allocator);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1181,13 +1181,13 @@ test "BvhTree.hit - miss everything" {
 test "BvhTree.hit - outside range" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     var hittables = [_]Hittable{
-        Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 }, 2.0, &test_material) },
+        Hittable{ .sphere = Sphere.init(Vec3.init(0.0, 0.0, -10.0), 2.0, &test_material) },
     };
 
     var bvh = try BvhTree.init(&hittables, 1, testing.allocator);
     defer bvh.deinit(testing.allocator);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 5.0 };
 
     var h: HitRecord = undefined;
@@ -1217,8 +1217,8 @@ test "Aabb.padToMinimums" {
 
 test "Box.init" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
-    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const a = Vec3.init(-1.0, -1.0, -1.0);
+    const b = Vec3.init(1.0, 1.0, 1.0);
     const box = Box.init(a, b, &test_material);
 
     try testing.expectEqual(@as(usize, 6), box.faces.len);
@@ -1234,12 +1234,12 @@ test "Box.init" {
 
 test "Box.hit - ray hits box" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
-    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const a = Vec3.init(-1.0, -1.0, -1.0);
+    const b = Vec3.init(1.0, 1.0, 1.0);
     const box = Box.init(a, b, &test_material);
 
     // Ray looking backwards (-z)
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 5.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1262,12 +1262,12 @@ test "Box.hit - ray hits box" {
 
 test "Box.hit - ray misses box" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
-    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const a = Vec3.init(-1.0, -1.0, -1.0);
+    const b = Vec3.init(1.0, 1.0, 1.0);
     const box = Box.init(a, b, &test_material);
 
     // Ray looking backward but translated high above the box on y max range
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 5.0, .z = 5.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 5.0, 5.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1277,11 +1277,11 @@ test "Box.hit - ray misses box" {
 
 test "Box.hit - ray originates inside box" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const a = Vec3{ .x = -2.0, .y = -2.0, .z = -2.0 };
-    const b = Vec3{ .x = 2.0, .y = 2.0, .z = 2.0 };
+    const a = Vec3.init(-2.0, -2.0, -2.0);
+    const b = Vec3.init(2.0, 2.0, 2.0);
     const box = Box.init(a, b, &test_material);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(1.0, 0.0, 0.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1300,8 +1300,8 @@ test "Box.hit - ray originates inside box" {
 
 test "Box.bbox" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const a = Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 };
-    const b = Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 };
+    const a = Vec3.init(-1.0, -1.0, -1.0);
+    const b = Vec3.init(1.0, 1.0, 1.0);
     const box = Box.init(a, b, &test_material);
 
     const bbox = box.bbox();
@@ -1316,8 +1316,8 @@ test "Box.bbox" {
 
 test "Box.alloc" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const a = Vec3{ .x = -2.0, .y = -2.0, .z = -2.0 };
-    const b = Vec3{ .x = 2.0, .y = 2.0, .z = 2.0 };
+    const a = Vec3.init(-2.0, -2.0, -2.0);
+    const b = Vec3.init(2.0, 2.0, 2.0);
 
     const box_ptr = try Box.alloc(a, b, &test_material, testing.allocator);
     defer testing.allocator.destroy(box_ptr);
@@ -1332,18 +1332,18 @@ test "Box.alloc" {
 test "Hittable.bbox" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
 
-    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material);
     const hittable_sphere = Hittable{ .sphere = sphere };
     const bbox_sphere = hittable_sphere.bbox();
     try testing.expectApproxEqAbs(@as(Float, -1.0), bbox_sphere.x.min, absEps);
 
-    const quad = Quad.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 }, &test_material);
+    const quad = Quad.init(Vec3.init(0.0, 0.0, 0.0), Vec3.init(1.0, 0.0, 0.0), Vec3.init(0.0, 1.0, 0.0), &test_material);
     const hittable_quad = Hittable{ .quad = quad };
     const bbox_quad = hittable_quad.bbox();
     const box_eps: Float = 0.001;
     try testing.expectApproxEqAbs(@as(Float, 0.0), bbox_quad.x.min, box_eps);
 
-    const box_ptr = try Box.alloc(Vec3{ .x = -1.0, .y = -1.0, .z = -1.0 }, Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }, &test_material, testing.allocator);
+    const box_ptr = try Box.alloc(Vec3.init(-1.0, -1.0, -1.0), Vec3.init(1.0, 1.0, 1.0), &test_material, testing.allocator);
     var hittable_box = Hittable{ .box = box_ptr };
     defer hittable_box.deinit(testing.allocator);
 
@@ -1355,24 +1355,24 @@ test "Hittable.deinit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
 
     // Value variations do not allocate any dynamic memory or get destroyed
-    var sphere_hittable = Hittable{ .sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material) };
+    var sphere_hittable = Hittable{ .sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material) };
     sphere_hittable.deinit(testing.allocator);
 
-    var quad_hittable = Hittable{ .quad = Quad.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 }, &test_material) };
+    var quad_hittable = Hittable{ .quad = Quad.init(Vec3.init(0.0, 0.0, 0.0), Vec3.init(1.0, 0.0, 0.0), Vec3.init(0.0, 1.0, 0.0), &test_material) };
     quad_hittable.deinit(testing.allocator);
 
     // Test box deletion for memory leaks
-    const box_ptr = try Box.alloc(Vec3{ .x = -5.0, .y = -5.0, .z = -5.0 }, Vec3{ .x = 5.0, .y = 5.0, .z = 5.0 }, &test_material, testing.allocator);
+    const box_ptr = try Box.alloc(Vec3.init(-5.0, -5.0, -5.0), Vec3.init(5.0, 5.0, 5.0), &test_material, testing.allocator);
     var box_hittable = Hittable{ .box = box_ptr };
     box_hittable.deinit(testing.allocator);
 }
 
 test "Translated.init and deinit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material);
     const hittable_sphere = Hittable{ .sphere = sphere };
 
-    var trans = try Translated.init(hittable_sphere, Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 }, testing.allocator);
+    var trans = try Translated.init(hittable_sphere, Vec3.init(1.0, 2.0, 3.0), testing.allocator);
     defer trans.deinit(testing.allocator);
 
     try testing.expectApproxEqAbs(@as(Float, 1.0), trans.offset.x, absEps);
@@ -1383,15 +1383,15 @@ test "Translated.init and deinit" {
 test "Translated.hit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     // Sphere at origin
-    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material);
     const hittable_sphere = Hittable{ .sphere = sphere };
 
     // Translate sphere to (0, 0, -5)
-    var trans = try Translated.init(hittable_sphere, Vec3{ .x = 0.0, .y = 0.0, .z = -5.0 }, testing.allocator);
+    var trans = try Translated.init(hittable_sphere, Vec3.init(0.0, 0.0, -5.0), testing.allocator);
     defer trans.deinit(testing.allocator);
 
     // Ray passing through origin, heading -Z
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1413,10 +1413,10 @@ test "Translated.hit" {
 
 test "Translated.bbox" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material);
     const hittable_sphere = Hittable{ .sphere = sphere };
 
-    var trans = try Translated.init(hittable_sphere, Vec3{ .x = 5.0, .y = 10.0, .z = -15.0 }, testing.allocator);
+    var trans = try Translated.init(hittable_sphere, Vec3.init(5.0, 10.0, -15.0), testing.allocator);
     defer trans.deinit(testing.allocator);
 
     const bbox = trans.bbox();
@@ -1430,7 +1430,7 @@ test "Translated.bbox" {
 
 test "Rotate.init and deinit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
-    const sphere = Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, &test_material);
+    const sphere = Sphere.init(Vec3.init(0.0, 0.0, 0.0), 1.0, &test_material);
     const hittable_sphere = Hittable{ .sphere = sphere };
 
     var rot = try RotatedY.init(hittable_sphere, 90.0, testing.allocator);
@@ -1445,7 +1445,7 @@ test "Rotate.hit" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
 
     // Quad on XY plane from x=1 to 3, y=0 to 2
-    const quad = Quad.init(Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 2.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 0.0, .y = 2.0, .z = 0.0 }, &test_material);
+    const quad = Quad.init(Vec3.init(1.0, 0.0, 0.0), Vec3.init(2.0, 0.0, 0.0), Vec3.init(0.0, 2.0, 0.0), &test_material);
     const hittable_quad = Hittable{ .quad = quad };
 
     // Rotate -90 degrees around Y (x goes to -z)
@@ -1455,7 +1455,7 @@ test "Rotate.hit" {
     // The quad which used to be at Z=0 and spanning X=[1,3] is now rotated around Y by -90:
     // This places it perfectly on the X=0 plane, spanning Z=[1,3].
     // Ray heading into -X, intersecting the rotated quad perpendicularly
-    const ray = Ray{ .origin = .{ .x = 5.0, .y = 1.0, .z = 2.0 }, .dir = .{ .x = -1.0, .y = 0.0, .z = 0.0 } };
+    const ray = Ray{ .origin = .init(5.0, 1.0, 2.0), .dir = .init(-1.0, 0.0, 0.0) };
     const ray_t_range = IntervalFloat{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -1478,7 +1478,7 @@ test "Rotate.hit" {
 test "Rotate.bbox" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
     // Box 1x1x1 at origin [0,1]
-    const box_ptr = try Box.alloc(Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, Vec3{ .x = 1.0, .y = 1.0, .z = 1.0 }, &test_material, testing.allocator);
+    const box_ptr = try Box.alloc(Vec3.init(0.0, 0.0, 0.0), Vec3.init(1.0, 1.0, 1.0), &test_material, testing.allocator);
     const hittable_box = Hittable{ .box = box_ptr };
 
     // Rotate 45 deg around Z
@@ -1499,34 +1499,34 @@ test "Hittable builder functions" {
     const test_material = Material{ .lambertian = .{ .albedo = .{ .v = .{ 0.5, 0.5, 0.5 } } } };
 
     // createSphere
-    var s = Hittable.createSphere(Vec3{.x = 0, .y = 0, .z = 0}, 1.0, &test_material);
+    var s = Hittable.createSphere(Vec3.init(0, 0, 0), 1.0, &test_material);
     try testing.expect(std.meta.activeTag(s) == .sphere);
     s.deinit(testing.allocator);
 
     // createQuad
-    var q = Hittable.createQuad(Vec3{.x = 0, .y = 0, .z = 0}, Vec3{.x = 1, .y = 0, .z = 0}, Vec3{.x = 0, .y = 1, .z = 0}, &test_material);
+    var q = Hittable.createQuad(Vec3.init(0, 0, 0), Vec3.init(1, 0, 0), Vec3.init(0, 1, 0), &test_material);
     try testing.expect(std.meta.activeTag(q) == .quad);
     q.deinit(testing.allocator);
 
     // createBox (allocates)
-    var b = try Hittable.createBox(Vec3{.x = -1, .y = -1, .z = -1}, Vec3{.x = 1, .y = 1, .z = 1}, &test_material, testing.allocator);
+    var b = try Hittable.createBox(Vec3.init(-1, -1, -1), Vec3.init(1, 1, 1), &test_material, testing.allocator);
     try testing.expect(std.meta.activeTag(b) == .box);
     b.deinit(testing.allocator);
 
     // translate, rotate (allocate interior Hittable pointer)
-    var t = try Hittable.translate(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), Vec3{.x=1,.y=1,.z=1}, testing.allocator);
+    var t = try Hittable.translate(Hittable.createSphere(Vec3.init(0, 0, 0), 1.0, &test_material), Vec3.init(1, 1, 1), testing.allocator);
     try testing.expect(std.meta.activeTag(t) == .translated);
     t.deinit(testing.allocator);
 
-    var rx = try Hittable.rotateX(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), 45.0, testing.allocator);
+    var rx = try Hittable.rotateX(Hittable.createSphere(Vec3.init(0, 0, 0), 1.0, &test_material), 45.0, testing.allocator);
     try testing.expect(std.meta.activeTag(rx) == .rotated_x);
     rx.deinit(testing.allocator);
 
-    var ry = try Hittable.rotateY(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), 45.0, testing.allocator);
+    var ry = try Hittable.rotateY(Hittable.createSphere(Vec3.init(0, 0, 0), 1.0, &test_material), 45.0, testing.allocator);
     try testing.expect(std.meta.activeTag(ry) == .rotated_y);
     ry.deinit(testing.allocator);
 
-    var rz = try Hittable.rotateZ(Hittable.createSphere(Vec3{.x=0,.y=0,.z=0}, 1.0, &test_material), 45.0, testing.allocator);
+    var rz = try Hittable.rotateZ(Hittable.createSphere(Vec3.init(0, 0, 0), 1.0, &test_material), 45.0, testing.allocator);
     try testing.expect(std.meta.activeTag(rz) == .rotated_z);
     rz.deinit(testing.allocator);
 }

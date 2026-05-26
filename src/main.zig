@@ -78,8 +78,8 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
     };
 
     const camera = Camera.initLookAt(
-        .{ .x = 13.0, .y = 2.0, .z = 3.0},
-        .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+        .init(13.0, 2.0, 3.0),
+        .init(0.0, 0.0, 0.0),
         20.0,
         10.0,
         0.6,
@@ -91,23 +91,23 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
     const small_radius: Float = 0.2;
 
     const ground_material = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.5, 0.5, 0.5) } });
-    const center_ground = Vec3 { .x = 0.0, .y = -1000.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .init(center_ground, 1000, ground_material) });
+    const center_ground = Vec3.init(0.0, -1000.0, 0.0);
+    try scene.add(Hittable.createSphere(center_ground, 1000, ground_material));
 
     const material_1 = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
-    const center_1 = Vec3 { .x = 0.0, .y = 1.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .init(center_1, 1.0, material_1) });
+    const center_1 = Vec3.init(0.0, 1.0, 0.0);
+    try scene.add(Hittable.createSphere(center_1, 1.0, material_1));
 
     const material_1_inside = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.0 / 1.5 } });
-    try scene.add(.{ .sphere = .init(center_1, 0.5, material_1_inside) });
+    try scene.add(Hittable.createSphere(center_1, 0.5, material_1_inside));
 
     const material_2 = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.4, 0.2, 0.1) } });
-    const center_2 = Vec3 { .x = -4.0, .y = 1.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .init(center_2, 1.0, material_2) });
+    const center_2 = Vec3.init(-4.0, 1.0, 0.0);
+    try scene.add(Hittable.createSphere(center_2, 1.0, material_2));
 
     const material_3 = try scene.createMaterial(. { .metal = .{ .albedo = .init(0.7, 0.6, 0.5), .fuzz = 0.0 } });
-    const center_3 = Vec3 { .x = 4.0, .y = 1.0, .z = 0.0 };
-    try scene.add(.{ .sphere = .init(center_3, 1.0, material_3) });
+    const center_3 = Vec3.init(4.0, 1.0, 0.0);
+    try scene.add(Hittable.createSphere(center_3, 1.0, material_3));
 
     var prng: std.Random.DefaultPrng = .init(121);
     const rand = prng.random();
@@ -126,7 +126,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
 
                 const x_offset = cell_x + small_radius + (safe_jitter_area * rand.float(Float));
                 const z_offset = cell_z + small_radius + (safe_jitter_area * rand.float(Float));
-                center = Vec3 { .x = x_offset, .y = small_radius, .z = z_offset };
+                center = Vec3.init(x_offset, small_radius, z_offset);
 
                 const dist_1_sq = Vec3.squaredDistance(center, center_1);
                 const dist_2_sq = Vec3.squaredDistance(center, center_2);
@@ -146,7 +146,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
                     const albedo = LinearColor.random(rand).mul(LinearColor.random(rand));
 
                     const lambertian = try scene.createMaterial(.{ .lambertian = .{ .albedo = albedo } });
-                    try scene.add(.{ .sphere = .init(center, small_radius, lambertian) });
+                    try scene.add(Hittable.createSphere(center, small_radius, lambertian));
                 }
                 else if (choose_mat < 0.85) {
                     // metal
@@ -154,12 +154,12 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
                     const fuzz = math_utils.rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0 }, .{ .min = 0.0, .max = 0.5});
 
                     const metal = try scene.createMaterial(.{ .metal = .{ .albedo = albedo, .fuzz = fuzz } });
-                    try scene.add(.{ .sphere = .init(center, small_radius, metal) });
+                    try scene.add(Hittable.createSphere(center, small_radius, metal));
                 }
                 else {
                     // glass
                     const dielectric = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
-                    try scene.add(.{ .sphere = .init(center, small_radius, dielectric) });
+                    try scene.add(Hittable.createSphere(center, small_radius, dielectric));
                 }
             }
         }
@@ -236,8 +236,8 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     };
 
     const camera = Camera.initLookAt(
-        .{ .x = 0.0, .y = 0.0, .z = 9.0},
-        .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+        .init(0.0, 0.0, 9.0),
+        .init(0.0, 0.0, 0.0),
         80.0,
         10.0,
         0.0,
@@ -253,36 +253,36 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     const lower_teal   = try scene.createMaterial(.{ .lambertian = .{ .albedo = LinearColor.init(0.2, 0.8, 0.8) } });
 
     // Quads
-    try scene.add(.{ .quad = Quad.init(
-        .{ .x = -3.0, .y = -2.0, .z = 5.0 },
-        .{ .x = 0.0, .y = 0.0, .z = -4.0 },
-        .{ .x = 0.0, .y = 4.0, .z = 0.0 },
+    try scene.add(Hittable.createQuad(
+        .init(-3.0, -2.0, 5.0),
+        .init(0.0, 0.0, -4.0),
+        .init(0.0, 4.0, 0.0),
         left_red
-    )});
-    try scene.add(.{ .quad = Quad.init(
-        .{ .x = -2.0, .y = -2.0, .z = 0.0 },
-        .{ .x = 4.0, .y = 0.0, .z = -0.0 },
-        .{ .x = 0.0, .y = 4.0, .z = 0.0 },
+    ));
+    try scene.add(Hittable.createQuad(
+        .init(-2.0, -2.0, 0.0),
+        .init(4.0, 0.0, -0.0),
+        .init(0.0, 4.0, 0.0),
         back_green
-    )});
-    try scene.add(.{ .quad = Quad.init(
-        .{ .x = 3.0, .y = -2.0, .z = 1.0 },
-        .{ .x = 0.0, .y = 0.0, .z = 4.0 },
-        .{ .x = 0.0, .y = 4.0, .z = 0.0 },
+    ));
+    try scene.add(Hittable.createQuad(
+        .init(3.0, -2.0, 1.0),
+        .init(0.0, 0.0, 4.0),
+        .init(0.0, 4.0, 0.0),
         right_blue
-    )});
-    try scene.add(.{ .quad = Quad.init(
-        .{ .x = -2.0, .y = 3.0, .z = 1.0 },
-        .{ .x = 4.0, .y = 0.0, .z = 0.0 },
-        .{ .x = 0.0, .y = 0.0, .z = 4.0 },
+    ));
+    try scene.add(Hittable.createQuad(
+        .init(-2.0, 3.0, 1.0),
+        .init(4.0, 0.0, 0.0),
+        .init(0.0, 0.0, 4.0),
         upper_orange
-    )});
-    try scene.add(.{ .quad = Quad.init(
-        .{ .x = -2.0, .y = -3.0, .z = 5.0 },
-        .{ .x = 4.0, .y = 0.0, .z = 0.0 },
-        .{ .x = 0.0, .y = 0.0, .z = -4.0 },
+    ));
+    try scene.add(Hittable.createQuad(
+        .init(-2.0, -3.0, 5.0),
+        .init(4.0, 0.0, 0.0),
+        .init(0.0, 0.0, -4.0),
         lower_teal
-    )});
+    ));
 
     try scene.buildBvh(1);
 
@@ -316,8 +316,8 @@ fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []
     };
 
     const camera = Camera.initLookAt(
-        .{ .x = 26.0, .y = 3.0, .z = 6.0},
-        .{ .x = 0.0, .y = 2.0, .z = 0.0 },
+        .init(26.0, 3.0, 6.0),
+        .init(0.0, 2.0, 0.0),
         20.0,
         10.0,
         0.0,
@@ -331,9 +331,9 @@ fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []
     const light_mat  = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(4.0, 4.0, 4.0) } });
 
     // Primitives
-    try scene.add(.{ .sphere = .init(.{ .x = 0.0, .y = -1000.0, .z = 0.0 }, 1000.0, ground_mat) });
-    try scene.add(.{ .sphere = .init(.{ .x = 0.0, .y = 2.0, .z = 0.0 }, 2.0, sphere_mat) });
-    try scene.add(.{ .quad = .init(.{ .x = 3.0, .y = 1.0, .z = -2.0 }, .{ .x = 2.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 2.0, .z = 0.0 }, light_mat) });
+    try scene.add(Hittable.createSphere(.init(0.0, -1000.0, 0.0), 1000.0, ground_mat));
+    try scene.add(Hittable.createSphere(.init(0.0, 2.0, 0.0), 2.0, sphere_mat));
+    try scene.add(Hittable.createQuad(.init(3.0, 1.0, -2.0), .init(2.0, 0.0, 0.0), .init(0.0, 2.0, 0.0), light_mat));
 
     try scene.buildBvh(1);
 
@@ -367,8 +367,8 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     };
 
     const camera = Camera.initLookAt(
-        .{ .x = 278.0, .y = 278.0, .z = -800.0},
-        .{ .x = 278.0, .y = 278.0, .z = 0.0 },
+        .init(278.0, 278.0, -800.0),
+        .init(278.0, 278.0, 0.0),
         40.0,
         10.0,
         0.0,
@@ -383,21 +383,21 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     const light = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(15.0, 15.0, 15.0) } });
 
     // Primitives
-    try scene.add(.{ .quad = .init(.{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, red) });
-    try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, green) });
-    try scene.add(.{ .quad = .init(.{ .x = 343.0, .y = 554.0, .z = 332.0 }, .{ .x = -130.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = -105.0 }, light) });
-    try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = 555.0 }, white) });
-    try scene.add(.{ .quad = .init(.{ .x = 555.0, .y = 555.0, .z = 555.0 }, .{ .x = -555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 0.0, .z = -555.0 }, white) });
-    try scene.add(.{ .quad = .init(.{ .x = 0.0, .y = 0.0, .z = 555.0 }, .{ .x = 555.0, .y = 0.0, .z = 0.0 }, .{ .x = 0.0, .y = 555.0, .z = 0.0 }, white) });
+    try scene.add(Hittable.createQuad(.init(555.0, 0.0, 0.0),     .init(0.0, 555.0, 0.0),  .init(0.0, 0.0, 555.0), red));
+    try scene.add(Hittable.createQuad(.init(0.0, 0.0, 0.0),       .init(0.0, 555.0, 0.0),  .init(0.0, 0.0, 555.0), green));
+    try scene.add(Hittable.createQuad(.init(343.0, 554.0, 332.0), .init(-130.0, 0.0, 0.0), .init(0.0, 0.0, -105.0), light));
+    try scene.add(Hittable.createQuad(.init(0.0, 0.0, 0.0),       .init(555.0, 0.0, 0.0),  .init(0.0, 0.0, 555.0), white));
+    try scene.add(Hittable.createQuad(.init(555.0, 555.0, 555.0), .init(-555.0, 0.0, 0.0), .init(0.0, 0.0, -555.0), white));
+    try scene.add(Hittable.createQuad(.init(0.0, 0.0, 555.0),     .init(555.0, 0.0, 0.0),  .init(0.0, 555.0, 0.0), white));
 
-    var box1 = try Hittable.createBox(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 165.0, .y = 330.0, .z = 165.0 }, white, gpa);
+    var box1 = try Hittable.createBox(.init(0.0, 0.0, 0.0), .init(165.0, 330.0, 165.0), white, gpa);
     box1 = try box1.rotateY(15.0, gpa);
-    box1 = try box1.translate(.{ .x = 265.0, .y = 0.0, .z = 295.0 }, gpa);
+    box1 = try box1.translate(.init(265.0, 0.0, 295.0), gpa);
     try scene.add(box1);
 
-    var box2 = try Hittable.createBox(.{ .x = 0.0, .y = 0.0, .z = 0.0 }, .{ .x = 165.0, .y = 165.0, .z = 165.0 }, white, gpa);
+    var box2 = try Hittable.createBox(.init(0.0, 0.0, 0.0), .init(165.0, 165.0, 165.0), white, gpa);
     box2 = try box2.rotateY(-18.0, gpa);
-    box2 = try box2.translate(.{ .x = 130.0, .y = 0.0, .z = 65.0 }, gpa);
+    box2 = try box2.translate(.init(130.0, 0.0, 65.0), gpa);
     try scene.add(box2);
 
     try scene.buildBvh(1);

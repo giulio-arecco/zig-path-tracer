@@ -175,7 +175,7 @@ test "Scene.add and Scene.buildBvh" {
     const mat_ptr = try scene.createMaterial(Material{ .lambertian = .{ .albedo = LinearColor{ .v = .{ 0.5, 0.5, 0.5 } } } });
 
     // Add first element
-    const sphere1 = geometry.Sphere.init(Vec3{ .x = 1.0, .y = 1.0, .z = -5.0 }, 1.0, mat_ptr);
+    const sphere1 = geometry.Sphere.init(Vec3.init(1.0, 1.0, -5.0), 1.0, mat_ptr);
     try scene.add(Hittable{ .sphere = sphere1 });
     try testing.expectEqual(@as(usize, 1), scene.hittables.items.len);
 
@@ -184,7 +184,7 @@ test "Scene.add and Scene.buildBvh" {
     try testing.expect(scene.bvh != null);
 
     // Add second element. Adding to the scene invalidates the BVH.
-    const sphere2 = geometry.Sphere.init(Vec3{ .x = -1.0, .y = -1.0, .z = -5.0 }, 1.0, mat_ptr);
+    const sphere2 = geometry.Sphere.init(Vec3.init(-1.0, -1.0, -5.0), 1.0, mat_ptr);
     try scene.add(Hittable{ .sphere = sphere2 });
     try testing.expectEqual(@as(usize, 2), scene.hittables.items.len);
     try testing.expect(scene.bvh == null);
@@ -195,10 +195,10 @@ test "Scene.hit without BVH" {
     defer scene.deinit();
 
     const mat_ptr = try scene.createMaterial(Material{ .lambertian = .{ .albedo = LinearColor{ .v = .{ 0.5, 0.5, 0.5 } } } });
-    const sphere = geometry.Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -5.0 }, 1.0, mat_ptr);
+    const sphere = geometry.Sphere.init(Vec3.init(0.0, 0.0, -5.0), 1.0, mat_ptr);
     try scene.add(Hittable{ .sphere = sphere });
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = Interval{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -215,12 +215,12 @@ test "Scene.hit with BVH" {
     defer scene.deinit();
 
     const mat_ptr = try scene.createMaterial(Material{ .lambertian = .{ .albedo = LinearColor{ .v = .{ 0.5, 0.5, 0.5 } } } });
-    const sphere = geometry.Sphere.init(Vec3{ .x = 0.0, .y = 0.0, .z = -5.0 }, 1.0, mat_ptr);
+    const sphere = geometry.Sphere.init(Vec3.init(0.0, 0.0, -5.0), 1.0, mat_ptr);
     try scene.add(Hittable{ .sphere = sphere });
 
     try scene.buildBvh(1);
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = Interval{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;
@@ -236,7 +236,7 @@ test "Scene.hit with empty scene" {
     var scene = Scene.init(undefined, LinearColor{ .v = .{ 0.0, 0.0, 0.0 } }, testing.allocator);
     defer scene.deinit();
 
-    const ray = Ray{ .origin = .{ .x = 0.0, .y = 0.0, .z = 0.0 }, .dir = .{ .x = 0.0, .y = 0.0, .z = -1.0 } };
+    const ray = Ray{ .origin = .init(0.0, 0.0, 0.0), .dir = .init(0.0, 0.0, -1.0) };
     const ray_t_range = Interval{ .min = 0.0, .max = 100.0 };
 
     var h: HitRecord = undefined;

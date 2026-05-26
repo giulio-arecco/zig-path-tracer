@@ -67,11 +67,11 @@ pub fn initLookAt (from: Vec3, to: Vec3, vertical_fov: Float, focus_distance: Fl
     // Determine the camera orientation
     const unit_forward = normalized(sub(from, to));
 
-    var randVec = Vec3 { .x = 0.0, .y = 1.0, .z = 0.0 };
+    var randVec = Vec3.init(0.0, 1.0, 0.0);
     if (approxEq(Float, 1.0, @abs(dot(randVec, unit_forward)))) {
         // If @abs(a.dot(b)) == 1.0, a and b are parallel and their cross product will be a zero-vector.
         // In this case, change randVec to be z-aligned.
-        randVec = Vec3 {.x = 0.0, .y = 0.0, .z = 1.0 };
+        randVec = Vec3.init(0.0, 0.0, 1.0);
     }
 
     const unit_right = cross(randVec, unit_forward);
@@ -83,7 +83,7 @@ pub fn initLookAt (from: Vec3, to: Vec3, vertical_fov: Float, focus_distance: Fl
 
 /// Construct a camera ray originating from the defocus disk and directed at a randomly sampled point around the pixel location x_screen, y_screen
 pub fn getRay(self: Camera, rand: std.Random, x_screen: usize, y_screen: usize, sample_center: bool) Ray {
-    const offset: Vec3 = if (sample_center) .{ .x = 0.0, .y = 0.0, .z = 0.0 } else sample_unit_square(rand);
+    const offset: Vec3 = if (sample_center) .init(0.0, 0.0, 0.0) else sample_unit_square(rand);
 
     const pixel_sample = self._pixel_top_left.
                 add(self._pixel_delta_u.scalarMul(@as(Float, @floatFromInt(x_screen)) + offset.x)).
@@ -102,7 +102,7 @@ fn defocus_disk_sample(self: Camera, rand: std.Random) Vec3 {
 }
 
 fn sample_unit_square(prng: std.Random) Vec3 {
-    return .{ .x = prng.float(Float) - 0.5, .y = prng.float(Float) - 0.5, .z = 0.0 };
+    return .init(prng.float(Float) - 0.5, prng.float(Float) - 0.5, 0.0);
 }
 
 fn viewportSetup(pos: Vec3, unit_up: Vec3, unit_right: Vec3, unit_forward: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: RenderSettings) Camera {
@@ -150,9 +150,9 @@ const rel_eps = @sqrt(std.math.floatEps(Float));
 
 test "init" {
     const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
-    const pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
-    var up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
-    var right = Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 };
+    const pos = Vec3.init(0.0, 0.0, 0.0);
+    var up = Vec3.init(0.0, 1.0, 0.0);
+    var right = Vec3.init(1.0, 0.0, 0.0);
     var camera = init(pos, up, right, 10.0, 0.0, 90.0, rs);
 
     try std.testing.expectApproxEqRel(10.0, camera._focus_distance, rel_eps);
@@ -161,9 +161,9 @@ test "init" {
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, up));
     try std.testing.expect(Vec3.isApproxEq(camera._right, right));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(0.0, 0.0, 1.0)));
 
-    up = Vec3{ .x = 0.0, .y = std.math.sqrt1_2, .z = std.math.sqrt1_2 };
+    up = Vec3.init(0.0, std.math.sqrt1_2, std.math.sqrt1_2);
     camera = init(pos, up, right, std.math.floatMax(Float) / 2.0, 0.0, 90.0, rs);
     try std.testing.expectApproxEqRel(std.math.floatMax(Float) / 2.0, camera._focus_distance, rel_eps);
     try std.testing.expectApproxEqAbs(0.0, camera._defocus_angle, abs_eps);
@@ -171,77 +171,77 @@ test "init" {
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, up));
     try std.testing.expect(Vec3.isApproxEq(camera._right, right));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = -std.math.sqrt1_2, .z = std.math.sqrt1_2 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(0.0, -std.math.sqrt1_2, std.math.sqrt1_2)));
 
-    up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
-    right = Vec3{ .x = std.math.sqrt1_2, .y = 0.0, .z = std.math.sqrt1_2 };
+    up = Vec3.init(0.0, 1.0, 0.0);
+    right = Vec3.init(std.math.sqrt1_2, 0.0, std.math.sqrt1_2);
     camera = init(pos, up, right, std.math.floatMax(Float) / 2.0, 0.0, 90.0, rs);
     try std.testing.expectApproxEqRel(std.math.floatMax(Float) / 2.0, camera._focus_distance, rel_eps);
     try std.testing.expectApproxEqRel(90.0, camera._vertical_fov, rel_eps);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
     try std.testing.expect(Vec3.isApproxEq(camera._up, up));
     try std.testing.expect(Vec3.isApproxEq(camera._right, right));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = -std.math.sqrt1_2, .y = 0.0, .z = std.math.sqrt1_2 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(-std.math.sqrt1_2, 0.0, std.math.sqrt1_2)));
 }
 
 test "initLookAt" {
     const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
-    const pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
-    var to = Vec3{ .x = 0.0, .y = 0.0, .z = -50.0 };
+    const pos = Vec3.init(0.0, 0.0, 0.0);
+    var to = Vec3.init(0.0, 0.0, -50.0);
     var camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
 
     try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
     try std.testing.expectApproxEqAbs(0.0, camera._defocus_angle, abs_eps);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
-    try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._up, .init(0.0, 1.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._right, .init(1.0, 0.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(0.0, 0.0, 1.0)));
 
-    to = Vec3{ .x = @cos(pi / 4.0), .y = 0, .z = @sin(pi / 4.0) };
+    to = Vec3.init(@cos(pi / 4.0), 0, @sin(pi / 4.0));
     camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
     try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
-    try std.testing.expect(Vec3.isApproxEq(camera._pos, .{ .x = 0.0, .y = 0.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = -std.math.sqrt1_2, .y = 0.0, .z = std.math.sqrt1_2 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = -std.math.sqrt1_2, .y = 0.0, .z = -std.math.sqrt1_2 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._pos, .init(0.0, 0.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._up, .init(0.0, 1.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._right, .init(-std.math.sqrt1_2, 0.0, std.math.sqrt1_2)));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(-std.math.sqrt1_2, 0.0, -std.math.sqrt1_2)));
 
-    to = Vec3{ .x = 0.0, .y = 1.0, .z = -50.0 };
-    camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
-    try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
-    try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
-    try std.testing.expect(!Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));
-    try std.testing.expect(!Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
-
-    to = Vec3{ .x = 1.0, .y = 0.0, .z = -50.0 };
+    to = Vec3.init(0.0, 1.0, -50.0);
     camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
     try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
-    try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
-    try std.testing.expect(!Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));
-    try std.testing.expect(!Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
+    try std.testing.expect(!Vec3.isApproxEq(camera._up, .init(0.0, 1.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._right, .init(1.0, 0.0, 0.0)));
+    try std.testing.expect(!Vec3.isApproxEq(camera._forward, .init(0.0, 0.0, 1.0)));
 
-    to = Vec3{ .x = 0.0, .y = 20.0, .z = 0.0 };
+    to = Vec3.init(1.0, 0.0, -50.0);
     camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
     try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
-    try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = 1.0, .y = 0.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = -1.0, .z = 0.0 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._up, .init(0.0, 1.0, 0.0)));
+    try std.testing.expect(!Vec3.isApproxEq(camera._right, .init(1.0, 0.0, 0.0)));
+    try std.testing.expect(!Vec3.isApproxEq(camera._forward, .init(0.0, 0.0, 1.0)));
 
-    to = Vec3{ .x = 0.0, .y = -20.0, .z = 0.0 };
+    to = Vec3.init(0.0, 20.0, 0.0);
     camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
     try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
     try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
-    try std.testing.expect(Vec3.isApproxEq(camera._up, .{ .x = 0.0, .y = 0.0, .z = 1.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._right, .{ .x = -1.0, .y = 0.0, .z = 0.0 }));
-    try std.testing.expect(Vec3.isApproxEq(camera._forward, .{ .x = 0.0, .y = 1.0, .z = 0.0 }));
+    try std.testing.expect(Vec3.isApproxEq(camera._up, .init(0.0, 0.0, 1.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._right, .init(1.0, 0.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(0.0, -1.0, 0.0)));
+
+    to = Vec3.init(0.0, -20.0, 0.0);
+    camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
+    try std.testing.expectApproxEqRel(Vec3.distance(pos, to), camera._focus_distance, rel_eps);
+    try std.testing.expect(Vec3.isApproxEq(camera._pos, pos));
+    try std.testing.expect(Vec3.isApproxEq(camera._up, .init(0.0, 0.0, 1.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._right, .init(-1.0, 0.0, 0.0)));
+    try std.testing.expect(Vec3.isApproxEq(camera._forward, .init(0.0, 1.0, 0.0)));
 }
 
 test "viewportSetup" {
     const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
-    const pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
-    const to = Vec3{ .x = 0.0, .y = 0.0, .z = -10.0 };
+    const pos = Vec3.init(0.0, 0.0, 0.0);
+    const to = Vec3.init(0.0, 0.0, -10.0);
     const fov: Float = 90.0;
     const defocus_angle: Float = 10.0;
     const focus_distance: Float = 10.0;

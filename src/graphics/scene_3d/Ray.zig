@@ -21,8 +21,8 @@ pub fn at(self: Ray, t: Float) Vec3 {
 }
 
 test "at" {
-    const origin = Vec3{ .x = 1.0, .y = 2.0, .z = 3.0 };
-    const dir = Vec3{ .x = 0.5, .y = 0.0, .z = -0.5 };
+    const origin = Vec3.init(1.0, 2.0, 3.0);
+    const dir = Vec3.init(0.5, 0.0, -0.5);
     const ray = Ray{ .origin = origin, .dir = dir };
     const absEps = 2 * std.math.floatEps(Float);
 

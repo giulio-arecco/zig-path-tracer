@@ -101,7 +101,6 @@ pub fn evaluateDiscriminant(comptime T: type, a: T, b: T, c: T) struct {u8, T} {
 /// 1: Repeated real root\
 /// 2: Two real roots
 pub fn evaluateDiscriminantReduced(comptime T: type, a: T, h: T, c: T) struct {u8, T} {
-    //TODO: Consider checking if a or c ar == 1 to avoid a multiplication
     switch (@typeInfo(T)) {
         .int => |int_info| {
             if (int_info.signedness == .unsigned) {
@@ -385,41 +384,6 @@ test "Interval.rescaleValue" {
     try std.testing.expectApproxEqAbs(2.0, source_range.rescaleValue(15.0, target_range), floatEps(f32));
 }
 
-test "normalizeFloat" {
-    const IntervalF32 = Interval(f32);
-    const range = IntervalF32{ .min = 0.0, .max = 10.0 };
-
-    try std.testing.expectApproxEqAbs(0.0, normalizeFloat(f32, 0.0, range), floatEps(f32));
-    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, 5.0, range), floatEps(f32));
-    try std.testing.expectApproxEqAbs(1.0, normalizeFloat(f32, 10.0, range), floatEps(f32));
-
-    const range_neg = IntervalF32{ .min = -10.0, .max = 0.0 };
-    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, -5.0, range_neg), floatEps(f32));
-
-    const range_pos = IntervalF32{ .min = 10.0, .max = 20.0 };
-    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, 15.0, range_pos), floatEps(f32));
-
-    const range_nonzero = IntervalF32{ .min = 5.0, .max = 15.0 };
-    try std.testing.expectApproxEqAbs(0.0, normalizeFloat(f32, 5.0, range_nonzero), floatEps(f32));
-    try std.testing.expectApproxEqAbs(1.0, normalizeFloat(f32, 15.0, range_nonzero), floatEps(f32));
-}
-
-test "rescaleFloat" {
-    const IntervalF32 = Interval(f32);
-    const old_range = IntervalF32{ .min = 0.0, .max = 10.0 };
-    const new_range = IntervalF32{ .min = -1.0, .max = 1.0 };
-
-    try std.testing.expectApproxEqAbs(-1.0, rescaleFloat(f32, 0.0, old_range, new_range), floatEps(f32));
-    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, 5.0, old_range, new_range), floatEps(f32));
-    try std.testing.expectApproxEqAbs(1.0, rescaleFloat(f32, 10.0, old_range, new_range), floatEps(f32));
-
-    const old_range_neg = IntervalF32{ .min = -10.0, .max = 0.0 };
-    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, -5.0, old_range_neg, new_range), floatEps(f32));
-
-    const old_range_pos = IntervalF32{ .min = 10.0, .max = 20.0 };
-    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, 15.0, old_range_pos, new_range), floatEps(f32));
-}
-
 test "Interval.expand" {
     const IntervalF32 = Interval(f32);
     const intvlF = IntervalF32{ .min = 1.0, .max = 5.0 };
@@ -464,5 +428,40 @@ test "Interval.initEncloseTwo" {
     const enclosedI = IntervalI32.initEncloseTwo(aI, bI);
     try std.testing.expectEqual(@as(i32, -5), enclosedI.min);
     try std.testing.expectEqual(@as(i32, 3), enclosedI.max);
+}
+
+test "normalizeFloat" {
+    const IntervalF32 = Interval(f32);
+    const range = IntervalF32{ .min = 0.0, .max = 10.0 };
+
+    try std.testing.expectApproxEqAbs(0.0, normalizeFloat(f32, 0.0, range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, 5.0, range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, normalizeFloat(f32, 10.0, range), floatEps(f32));
+
+    const range_neg = IntervalF32{ .min = -10.0, .max = 0.0 };
+    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, -5.0, range_neg), floatEps(f32));
+
+    const range_pos = IntervalF32{ .min = 10.0, .max = 20.0 };
+    try std.testing.expectApproxEqAbs(0.5, normalizeFloat(f32, 15.0, range_pos), floatEps(f32));
+
+    const range_nonzero = IntervalF32{ .min = 5.0, .max = 15.0 };
+    try std.testing.expectApproxEqAbs(0.0, normalizeFloat(f32, 5.0, range_nonzero), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, normalizeFloat(f32, 15.0, range_nonzero), floatEps(f32));
+}
+
+test "rescaleFloat" {
+    const IntervalF32 = Interval(f32);
+    const old_range = IntervalF32{ .min = 0.0, .max = 10.0 };
+    const new_range = IntervalF32{ .min = -1.0, .max = 1.0 };
+
+    try std.testing.expectApproxEqAbs(-1.0, rescaleFloat(f32, 0.0, old_range, new_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, 5.0, old_range, new_range), floatEps(f32));
+    try std.testing.expectApproxEqAbs(1.0, rescaleFloat(f32, 10.0, old_range, new_range), floatEps(f32));
+
+    const old_range_neg = IntervalF32{ .min = -10.0, .max = 0.0 };
+    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, -5.0, old_range_neg, new_range), floatEps(f32));
+
+    const old_range_pos = IntervalF32{ .min = 10.0, .max = 20.0 };
+    try std.testing.expectApproxEqAbs(0.0, rescaleFloat(f32, 15.0, old_range_pos, new_range), floatEps(f32));
 }
 

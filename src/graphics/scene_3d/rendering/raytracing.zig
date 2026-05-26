@@ -12,22 +12,19 @@ const Interval = math_utils.Interval(Float);
 const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
-pub const RayTracer = struct {
+pub const SerialPathTracer = struct {
     settings: RenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: RayTracer, scene: *const Scene, out: []u8) void {
+    pub fn render(self: SerialPathTracer, scene: *const Scene, out: []u8) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
 
-        std.debug.print("Viewport Center: {}.\n", .{camera._viewport_center});
-        std.debug.print("First pixel position: {}\n", .{camera._pixel_top_left});
-
         var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera._pixel_top_left.squaredMagnitude())));
         const random = prng.random();
 
-        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Serial Ray Tracing", image_height) else null;
+        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Render (Serial Path Tracer)", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
@@ -41,22 +38,19 @@ pub const RayTracer = struct {
     }
 };
 
-pub const ParallelRayTracer = struct {
+pub const ParallelPathTracer = struct {
     io: std.Io,
     settings: RenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: ParallelRayTracer, scene: *const Scene, out: []u8) !void {
+    pub fn render(self: ParallelPathTracer, scene: *const Scene, out: []u8) !void {
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
-
-        std.debug.print("Viewport Center: {}.\n", .{scene.camera._viewport_center});
-        std.debug.print("First pixel position: {}\n", .{scene.camera._pixel_top_left});
 
         var group: std.Io.Group = .init;
         defer group.cancel(self.io);
 
-        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Parallel Ray Tracing", image_height) else null;
+        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Render (Parallel Path Tracer)", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
@@ -75,7 +69,7 @@ pub const ParallelRayTracer = struct {
         try group.await(self.io);
     }
 
-    fn renderRow(self: ParallelRayTracer, scene: *const Scene, y_screen: usize, row: []u8, progress_node: ?std.Progress.Node) void {
+    fn renderRow(self: ParallelPathTracer, scene: *const Scene, y_screen: usize, row: []u8, progress_node: ?std.Progress.Node) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
 

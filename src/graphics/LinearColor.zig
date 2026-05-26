@@ -246,11 +246,11 @@ pub fn random(rand: std.Random) LinearColor {
     return .init(rand.float(Float), rand.float(Float), rand.float(Float));
 }
 
-pub fn randomInRange(rand: std.Random, min: Float, max: Float) LinearColor {
+pub fn randomInRange(rand: std.Random, range: Interval) LinearColor {
     return .init(
-        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
-        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
-        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max })
+        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, range),
+        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, range),
+        rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, range)
     );
 }
 

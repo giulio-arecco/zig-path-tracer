@@ -12,25 +12,19 @@ const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Hittable = graphics.scene_3d.geometry.Hittable;
-const Sphere = graphics.scene_3d.geometry.Sphere;
-const Quad = graphics.scene_3d.geometry.Quad;
-const Box = graphics.scene_3d.geometry.Box;
 const RenderSettings = rendering.RenderSettings;
-const RayTracer = raytracing.RayTracer;
-const ParallelRayTracer = raytracing.ParallelRayTracer;
+const SerialPathTracer = raytracing.SerialPathTracer;
+const ParallelPathTracer = raytracing.ParallelPathTracer;
 const Material = materials.Material;
 const Float = config.Float;
 
 const print = std.debug.print;
-const drawCircle = fs_utils.drawCircle;
 const createImgFile = fs_utils.createImgFile;
-const computePathStrLen = fs_utils.computePathStrLen;
 
 const IMG_WIDTH = 600;
 const IMG_HEIGHT= 600;
 
 const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
-const PATH_STR_LENGTH = computePathStrLen(IMG_OUT_PATHS);
 const FILE_PATH = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(IMG_OUT_PATHS)});
 const PPM_HEADER_LEN = fs_utils.computePpmP6HeaderSize(255, IMG_WIDTH, IMG_HEIGHT);
 
@@ -150,7 +144,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
                 }
                 else if (choose_mat < 0.85) {
                     // metal
-                    const albedo = LinearColor.randomInRange(rand, 0.5, 1.0);
+                    const albedo = LinearColor.randomInRange(rand, .{ .min = 0.5, .max = 1.0 });
                     const fuzz = math_utils.rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0 }, .{ .min = 0.0, .max = 0.5});
 
                     const metal = try scene.createMaterial(.{ .metal = .{ .albedo = albedo, .fuzz = fuzz } });
@@ -172,7 +166,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
 
     var threaded = std.Io.Threaded.init(gpa, .{});
     defer threaded.deinit();
-    const parallel_raytracer = ParallelRayTracer {
+    const parallel_raytracer = ParallelPathTracer {
         .settings = render_settings,
         .io = threaded.io(),
         .progress_root_node = root_node
@@ -288,7 +282,7 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
 
     var threaded = std.Io.Threaded.init(gpa, .{});
     defer threaded.deinit();
-    const parallel_raytracer = ParallelRayTracer {
+    const parallel_raytracer = ParallelPathTracer {
         .settings = render_settings,
         .io = threaded.io(),
         .progress_root_node = root_node
@@ -339,7 +333,7 @@ fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []
 
     var threaded = std.Io.Threaded.init(gpa, .{});
     defer threaded.deinit();
-    const parallel_raytracer = ParallelRayTracer {
+    const parallel_raytracer = ParallelPathTracer {
         .settings = render_settings,
         .io = threaded.io(),
         .progress_root_node = root_node
@@ -362,8 +356,8 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
         .image_height = IMG_HEIGHT,
         .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
         .max_ray_bounces = 50,
-        .samples_per_pixel = 200,
-        .pixel_samples_scale = 0.005, // 1/samples_per_pixel
+        .samples_per_pixel = 200, // 2000,
+        .pixel_samples_scale = 0.005, // 0.0005, // 1/samples_per_pixel
     };
 
     const camera = Camera.initLookAt(
@@ -380,31 +374,30 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     const red   = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.65, 0.05, 0.05) } });
     const white = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.73, 0.73, 0.73) } });
     const green = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.12, 0.45, 0.15) } });
-    const light = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(15.0, 15.0, 15.0) } });
+    const light = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(10.0, 10.0, 10.0) } });
+    const glass = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
 
     // Primitives
     try scene.add(Hittable.createQuad(.init(555.0, 0.0, 0.0),     .init(0.0, 555.0, 0.0),  .init(0.0, 0.0, 555.0), red));
     try scene.add(Hittable.createQuad(.init(0.0, 0.0, 0.0),       .init(0.0, 555.0, 0.0),  .init(0.0, 0.0, 555.0), green));
-    try scene.add(Hittable.createQuad(.init(343.0, 554.0, 332.0), .init(-130.0, 0.0, 0.0), .init(0.0, 0.0, -105.0), light));
+    try scene.add(Hittable.createQuad(.init(375.0, 554.0, 356.25), .init(-195.0, 0.0, 0.0), .init(0.0, 0.0, -157.5), light));
     try scene.add(Hittable.createQuad(.init(0.0, 0.0, 0.0),       .init(555.0, 0.0, 0.0),  .init(0.0, 0.0, 555.0), white));
     try scene.add(Hittable.createQuad(.init(555.0, 555.0, 555.0), .init(-555.0, 0.0, 0.0), .init(0.0, 0.0, -555.0), white));
     try scene.add(Hittable.createQuad(.init(0.0, 0.0, 555.0),     .init(555.0, 0.0, 0.0),  .init(0.0, 555.0, 0.0), white));
 
-    var box1 = try Hittable.createBox(.init(0.0, 0.0, 0.0), .init(165.0, 330.0, 165.0), white, gpa);
-    box1 = try box1.rotateY(15.0, gpa);
-    box1 = try box1.translate(.init(265.0, 0.0, 295.0), gpa);
-    try scene.add(box1);
+    var box = try Hittable.createBox(.init(0.0, 0.0, 0.0), .init(165.0, 330.0, 165.0), white, gpa);
+    box = try box.rotateY(15.0, gpa);
+    box = try box.translate(.init(265.0, 0.0, 295.0), gpa);
+    try scene.add(box);
 
-    var box2 = try Hittable.createBox(.init(0.0, 0.0, 0.0), .init(165.0, 165.0, 165.0), white, gpa);
-    box2 = try box2.rotateY(-18.0, gpa);
-    box2 = try box2.translate(.init(130.0, 0.0, 65.0), gpa);
-    try scene.add(box2);
+    const sphere = Hittable.createSphere(.init(190.0, 90.0, 190.0), 90.0, glass);
+    try scene.add(sphere);
 
     try scene.buildBvh(1);
 
     var threaded = std.Io.Threaded.init(gpa, .{});
     defer threaded.deinit();
-    const parallel_raytracer = ParallelRayTracer {
+    const parallel_raytracer = ParallelPathTracer {
         .settings = render_settings,
         .io = threaded.io(),
         .progress_root_node = root_node

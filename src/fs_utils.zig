@@ -8,11 +8,6 @@ const print = std.debug.print;
 const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
 
 
-pub const FillMethod = union(enum) {
-    color: Color,
-    gradient: Gradient
-};
-
 fn computePathStrLen(comptime path_components: []const []const u8) usize {
     comptime var len: usize = 0;
 
@@ -33,55 +28,6 @@ pub fn writePpmP6Header(writer: anytype, max_size: u16, img_width: usize, img_he
     assertAnytypeHasDecls(writer, &.{ "print", "flush" });
 
     try writer.print("P6\n{d} {d}\n{d}\n", .{img_width, img_height, max_size});
-    try writer.flush();
-}
-
-/// Writes on the passed in file to create a circle in the PPM P6 image format
-pub fn drawCircle(io: std.Io, file: std.Io.File, img_height: u16, img_width: u16, center_x: u16, center_y: u16, radius: u16, fill: FillMethod, bg_color: Color) !void {
-    std.debug.assert(radius > 0);
-    std.debug.assert(img_height > 0);
-    std.debug.assert(img_width > 0);
-
-    const int_type = isize;
-
-    const img_half_height = img_height / 2;
-    const img_half_width = img_width / 2;
-
-    const int_rad = @as(int_type, radius);
-    const x_c = @as(int_type, center_x);
-    const y_c = @as(int_type, center_y);
-    const rad_2 = int_rad * int_rad;
-
-    const bg_color_packed = bg_color.toPacked();
-
-    var buf: [1024]u8 = undefined;
-    var file_writer = file.writer(io, &buf);
-    const writer = &file_writer.interface;
-
-    // Write the ppm file header
-    try writer.print("P6\n{d} {d}\n255\n", .{img_width, img_height});
-
-    for(0..img_height) |i| {
-        const y= img_half_height - @as(int_type, @intCast(i)); // y is in range (-img_half_height, img_half_height]
-        const y_2 = (y - y_c) * (y - y_c);
-
-        for (0..img_width) |j| {
-            const x= @as(int_type, @intCast(j)) - img_half_width; // x is in range [-img_half_width, img_half_width)
-            const x_2 = (x - x_c) * (x - x_c);
-
-
-            if (x_2 + y_2 > rad_2) {
-                try writer.writeInt(u24, bg_color_packed, .big);
-            }
-            else {
-                switch (fill) {
-                    .color => |c| try writer.writeInt(u24, c.toPacked(), .big),
-                    .gradient => |g| try writer.writeInt(u24, g.atPacked(@floatFromInt(x)), .big)
-                }
-            }
-        }
-    }
-
     try writer.flush();
 }
 
@@ -285,44 +231,6 @@ test "Create image file - Handle PathAlreadyExists" {
 
     const secondStat = try dir.statFile(io, "output1.ppm", .{});
     try std.testing.expectEqual(0, secondStat.size);
-}
-
-test "Draw circle on file" {
-    const io = std.testing.io;
-    var tmpDir = std.testing.tmpDir(.{});
-    defer tmpDir.cleanup();
-    const dir = tmpDir.dir;
-
-    const sub_path = "output.ppm";
-
-    const file = try dir.createFile(io, sub_path, .{ .read = true});
-    defer file.close(io);
-
-    const img_height = 3;
-    const img_width = 3;
-    const fill = FillMethod { .color = Color {.r = 255, .g = 255, .b = 255 } };
-    const bg = Color {.r = 0, .g = 0, .b = 0 };
-
-    try drawCircle(io, file, img_height, img_width, 0, 0, 1, fill, bg);
-
-    const stat = try file.stat(io);
-    const header_length = 11;
-    try std.testing.expectEqual(header_length + img_height * img_width * 3, stat.size);
-
-    const bufsize = img_height * img_width * 3;
-    var buf: [bufsize]u8 = undefined;
-    var file_reader = file.reader(io, &buf);
-    try file_reader.seekTo(header_length);
-    const reader = &file_reader.interface;
-
-    const rgb_data = try reader.take(bufsize);
-
-    try std.testing.expectEqual(0, reader.bufferedLen());
-    try std.testing.expectEqualSlices(u8, &.{
-        0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
-        }, rgb_data);
 }
 
 test "Write PPM P6 header" {

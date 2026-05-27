@@ -611,20 +611,16 @@ const MockArgIterator = struct {
     }
 };
 
-fn getMockTerminal() std.Io.Terminal {
-    const MockStorage = struct {
-        var buf: [4]u8 = undefined;
-        var discarding: std.Io.Writer.Discarding = std.Io.Writer.Discarding.init(&buf);
-    };
-    return .{
-        .writer = &MockStorage.discarding.writer,
+test "parseArgs - default config" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
         .mode = .no_color,
     };
-}
 
-test "parseArgs - default config" {
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer"} };
-    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    const cfg_opt = try parseArgs(&it, dummy_term);
     try testing.expect(cfg_opt != null);
     const cfg = cfg_opt.?;
     try testing.expectEqual(false, cfg.track_progress);
@@ -632,8 +628,15 @@ test "parseArgs - default config" {
 }
 
 test "parseArgs - valid boolean flags" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--track-progress", "--time-report"} };
-    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    const cfg_opt = try parseArgs(&it, dummy_term);
     try testing.expect(cfg_opt != null);
     const cfg = cfg_opt.?;
     try testing.expect(cfg.track_progress);
@@ -641,6 +644,13 @@ test "parseArgs - valid boolean flags" {
 }
 
 test "parseArgs - equal syntax" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{
         "zig-pathtracer",
         "--renderer=Serial",
@@ -650,7 +660,7 @@ test "parseArgs - equal syntax" {
         "--max-bounces=50",
         "--samples=100"
     } };
-    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    const cfg_opt = try parseArgs(&it, dummy_term);
     try testing.expect(cfg_opt != null);
     const cfg = cfg_opt.?;
     try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
@@ -663,6 +673,13 @@ test "parseArgs - equal syntax" {
 }
 
 test "parseArgs - space syntax" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{
         "zig-pathtracer",
         "--renderer", "Serial",
@@ -672,7 +689,7 @@ test "parseArgs - space syntax" {
         "--max-bounces", "50",
         "--samples", "100"
     } };
-    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    const cfg_opt = try parseArgs(&it, dummy_term);
     try testing.expect(cfg_opt != null);
     const cfg = cfg_opt.?;
     try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
@@ -682,69 +699,125 @@ test "parseArgs - space syntax" {
 }
 
 test "parseArgs - help" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--help"} };
-    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    const cfg_opt = try parseArgs(&it, dummy_term);
     try testing.expect(cfg_opt == null);
 }
 
 test "parseArgs - unknown argument" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--unknown-arg"} };
-    try testing.expectError(error.UnknownArgument, parseArgs(&it, getMockTerminal()));
+    try testing.expectError(error.UnknownArgument, parseArgs(&it, dummy_term));
 }
 
 test "parseArgs - missing value" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--renderer"} };
-    try testing.expectError(error.MissingArgument, parseArgs(&it, getMockTerminal()));
+    try testing.expectError(error.MissingArgument, parseArgs(&it, dummy_term));
 
     var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--samples"} };
-    try testing.expectError(error.MissingArgumentValue, parseArgs(&it2, getMockTerminal()));
+    try testing.expectError(error.MissingArgumentValue, parseArgs(&it2, dummy_term));
 }
 
 test "parseArgs - invalid integer" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-height=abc"} };
-    try testing.expectError(error.InvalidCharacter, parseArgs(&it, getMockTerminal()));
+    try testing.expectError(error.InvalidCharacter, parseArgs(&it, dummy_term));
 }
 
 test "parseArgs - integer overflow" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-width=999999"} };
-    try testing.expectError(error.Overflow, parseArgs(&it, getMockTerminal()));
+    try testing.expectError(error.Overflow, parseArgs(&it, dummy_term));
 }
 
 test "parseArgs - integer boundary constraints" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     // Exact u16 max
     var it_max = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-height=65535"} };
-    const cfg_opt = try parseArgs(&it_max, getMockTerminal());
+    const cfg_opt = try parseArgs(&it_max, dummy_term);
     try testing.expect(cfg_opt != null);
     try testing.expectEqual(@as(u16, 65535), cfg_opt.?.render_settings.image_height);
 
     // Negative numbers
     var it_neg = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-width=-1"} };
-    try testing.expectError(error.Overflow, parseArgs(&it_neg, getMockTerminal()));
+    try testing.expectError(error.Overflow, parseArgs(&it_neg, dummy_term));
 
     // Zero
     var it_zero = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--max-bounces=0"} };
-    const cfg_zero_opt = try parseArgs(&it_zero, getMockTerminal());
+    const cfg_zero_opt = try parseArgs(&it_zero, dummy_term);
     try testing.expect(cfg_zero_opt != null);
     try testing.expectEqual(@as(u16, 0), cfg_zero_opt.?.render_settings.max_ray_bounces);
 }
 
 test "parseArgs - invalid enum values" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it1 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--renderer=FakeRenderer"} };
-    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it1, getMockTerminal()));
+    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it1, dummy_term));
 
     var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--scene=FakeScene"} };
-    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it2, getMockTerminal()));
+    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it2, dummy_term));
 }
 
 test "parseArgs - unexpected value for time-report, track_progress and help" {
+    var trash_buffer: [4]u8 = undefined;
+    var dw: std.Io.Writer.Discarding = .init(&trash_buffer);
+    const dummy_term: std.Io.Terminal = .{
+        .writer = &dw.writer,
+        .mode = .no_color,
+    };
+
     var it1 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--time-report=1"} };
-    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it1, getMockTerminal()));
+    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it1, dummy_term));
 
     var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--help=true"} };
-    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it2, getMockTerminal()));
+    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it2, dummy_term));
 
     var it3 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--track-progress=true"} };
-    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it3, getMockTerminal()));
+    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it3, dummy_term));
 }
 
 

@@ -2,7 +2,7 @@ const Scene = @This();
 
 const std = @import("std");
 const geometry = @import("geometry.zig");
-const config = @import("../../config.zig");
+const config = @import("../../global_config.zig");
 const math_utils = @import("../../math_utils.zig");
 
 const Ray = @import("Ray.zig");

@@ -1,7 +1,7 @@
 const LinearColor = @This();
 
 const std = @import("std");
-const config = @import("../config.zig");
+const config = @import("../global_config.zig");
 const math_utils = @import("../math_utils.zig");
 
 const Float = config.Float;

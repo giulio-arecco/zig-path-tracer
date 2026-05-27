@@ -1,4 +1,4 @@
-images/
+renders/
 .github/
 .zig-cache/
 zig-out/

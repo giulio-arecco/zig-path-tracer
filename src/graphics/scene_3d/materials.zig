@@ -4,7 +4,7 @@ const LinearColor = @import("../LinearColor.zig");
 const Vec3 = @import("../../Vec3.zig");
 const Ray = @import("Ray.zig");
 const HitRecord = @import("geometry.zig").HitRecord;
-const Float = @import("../../config.zig").Float;
+const Float = @import("../../global_config.zig").Float;
 
 const dot = Vec3.dot;
 

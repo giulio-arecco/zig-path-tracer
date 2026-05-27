@@ -1,5 +1,5 @@
 const std = @import("std");
-const config = @import("../../../config.zig");
+const config = @import("../../../global_config.zig");
 const geometry = @import("../geometry.zig");
 const math_utils = @import("../../../math_utils.zig");
 
@@ -24,7 +24,7 @@ pub const SerialPathTracer = struct {
         var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera._pixel_top_left.squaredMagnitude())));
         const random = prng.random();
 
-        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Render (Serial Path Tracer)", image_height) else null;
+        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Serial Path Tracer", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
@@ -50,7 +50,7 @@ pub const ParallelPathTracer = struct {
         var group: std.Io.Group = .init;
         defer group.cancel(self.io);
 
-        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Render (Parallel Path Tracer)", image_height) else null;
+        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Parallel Path Tracer", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {

@@ -1,6 +1,6 @@
 const RenderSettings = @This();
 
-const config = @import("../../../config.zig");
+const config = @import("../../../global_config.zig");
 const Float = config.Float;
 const Interval = @import("../../../math_utils.zig").Interval(Float);
 

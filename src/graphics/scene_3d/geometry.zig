@@ -1,5 +1,5 @@
 const std = @import("std");
-const config = @import("../../config.zig");
+const config = @import("../../global_config.zig");
 const math_utils = @import("../../math_utils.zig");
 const testing = std.testing;
 
@@ -575,7 +575,7 @@ pub const BvhTree = struct {
 
     /// A tagged union would be a more idiomatic way of representing leaf vs internal nodes.
     /// We avoid this to grant a size of 32 bytes (2 for the `BvhNode` `u32` fields, 6 for the `Aabb` `Interval(f32)` fields) for better performance.
-    /// Of course, this is only true if the `Float` type declared in config.zig is `f32`.
+    /// Of course, this is only true if the `Float` type declared in global_config.zig is `f32`.
     pub const BvhNode = struct {
         /// The number of primitives in this node. It's 0 if the node is internal, > 0 if it's a leaf.\
         /// Treat as **immutable**.

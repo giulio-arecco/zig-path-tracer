@@ -5,7 +5,7 @@ const math_utils = @import("../../math_utils.zig");
 
 const Vec3 = @import("../../Vec3.zig");
 const Scene = @import("Scene.zig");
-const Float = @import("../../config.zig").Float;
+const Float = @import("../../global_config.zig").Float;
 const LinearColor = @import("../LinearColor.zig");
 const LinearGradient = LinearColor.LinearGradient;
 const HitRecord = @import("geometry.zig").HitRecord;

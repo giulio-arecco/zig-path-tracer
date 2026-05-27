@@ -14,7 +14,7 @@ const std = @import("std");
 const math_utils = @import("../../math_utils.zig");
 
 const Vec3 = @import("../../Vec3.zig");
-const Float = @import("../../config.zig").Float;
+const Float = @import("../../global_config.zig").Float;
 const RenderSettings = @import("rendering/RenderSettings.zig");
 const Ray = @import("Ray.zig");
 

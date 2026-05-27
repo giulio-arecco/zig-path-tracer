@@ -1,7 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const graphics = @import("graphics.zig");
 const fs_utils = @import("fs_utils.zig");
-const config = @import("config.zig");
+const type_utils = @import("type_utils.zig");
+const config = @import("global_config.zig");
 const rendering = graphics.scene_3d.rendering;
 const raytracing = rendering.raytracing;
 const materials = graphics.scene_3d.materials;
@@ -20,17 +22,227 @@ const Float = config.Float;
 
 const print = std.debug.print;
 const createImgFile = fs_utils.createImgFile;
+const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
+
+const HELP_FMT_STR: []const u8 =
+            \\ Whenever an argument expects a value, it can be provided either with the syntax --<argument>=<value> or --<argument> <value>.
+            \\ Available arguments:
+            \\ --renderer
+            \\     Choose the rendering algorithm.
+            \\     Defaults to Parallel if your system supports multi-threading, Serial otherwise.
+            \\     Available values:
+            \\         - Serial
+            \\         - Parallel
+            \\
+            \\ --scene
+            \\     Choose the scene to render.
+            \\     Defaults to CornellBox.
+            \\     Available values:
+            \\         - ProceduralSpheres
+            \\         - CornellBox
+            \\         - Quads
+            \\
+            \\ --img-height
+            \\     Choose the output image height.
+            \\     Defaults to 600.
+            \\     Available values:
+            \\         - Any integer between 0 and {}.
+            \\
+            \\ --img-width
+            \\     Choose the output image width.
+            \\     Defaults to 600.
+            \\     Available values:
+            \\         - Any integer between 0 and {}.
+            \\
+            \\ --max-bounces
+            \\     Choose the maximum number of traced ray bounces before stopping the recursion.
+            \\     Defaults to 50.
+            \\     Available values:
+            \\         - Any integer between 0 and {}.
+            \\
+            \\ --samples
+            \\     Choose how many times a pixel is sampled (i.e. how many rays are sent through a single pixel).
+            \\     Defaults to 200.
+            \\     Available values:
+            \\         - Any integer between 0 and {}.
+            \\
+            \\ --track-progress
+            \\     Log the rendering progress (rendered image rows / total image rows).
+            \\     Defaults to false.
+            \\     This argument acts as a toggle, so it does not require any value.
+            \\
+            \\ --time-report
+            \\     Log the rendering time once it completes.
+            \\     Defaults to false.
+            \\     This argument acts as a toggle, so it does not require any value.
+            \\
+;
 
 const IMG_WIDTH = 600;
 const IMG_HEIGHT= 600;
 
-const IMG_OUT_PATHS: []const []const u8 = &.{"images", "output.ppm"};
+const IMG_OUT_PATHS: []const []const u8 = &.{"renders", "output.ppm"};
 const FILE_PATH = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(IMG_OUT_PATHS)});
 const PPM_HEADER_LEN = fs_utils.computePpmP6HeaderSize(255, IMG_WIDTH, IMG_HEIGHT);
 
-const TRACK_PROGRESS = true;
+const SceneId = enum { ProceduralSpheres, CornellBox, Quads };
+const RendererType = enum { Serial, Parallel };
 
 pub fn main(init: std.process.Init) !void {
+    // var gpa = std.heap.DebugAllocator(.{}) {};
+    // defer if (gpa.deinit() == .leak) {
+    //     @panic("Memory leak detected!");
+    // };
+    const allocator = init.arena.allocator();
+
+    var render_settings = RenderSettings {
+        .image_width = IMG_WIDTH,
+        .image_height = IMG_HEIGHT,
+        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
+        .max_ray_bounces = 50,
+        .samples_per_pixel = 200, // 2000,
+        .pixel_samples_scale = 0.005, // 0.0005, // 1/samples_per_pixel
+    };
+    var track_progress = false;
+    var time_report = false;
+    var scene_id: SceneId = .CornellBox;
+    var renderer_type: RendererType = if (builtin.single_threaded) .Serial else .Parallel;
+
+    var args_it = try init.minimal.args.iterateAllocator(allocator);
+    defer args_it.deinit();
+    _ = args_it.skip(); // Skip the executable name
+
+    while(args_it.next()) |arg| {
+        var split_it = std.mem.splitScalar(u8, arg, '=');
+        const arg_name = split_it.first();
+        const arg_val = split_it.next();
+
+        if (std.mem.eql(u8, arg_name, "--renderer")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                print("Error: missing value for '{s}'.\n", .{arg_name});
+                return error.MissingArgument;
+            };
+
+            if (std.meta.stringToEnum(RendererType, val_str)) |r| {
+                if (r == .Parallel and builtin.single_threaded) {
+                    print("Error: your system is single-threaded, therefore it can't run the '{s}' algorithm.\n", .{val_str});
+                    return error.ConcurrencyNotAvailable;
+                }
+                renderer_type = r;
+            } else {
+                print("Error: unknown renderer '{s}'. The available options are:\n", .{val_str});
+                const fields = @typeInfo(RendererType).@"enum".fields;
+                inline for (fields) |field| {
+                    print("- {s}\n", .{field.name});
+                }
+
+                return error.InvalidArgumentValue;
+            }
+        }
+        else if (std.mem.eql(u8, arg_name, "--scene")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                print("Error: missing value for '{s}'.\n", .{arg_name});
+                return error.MissingArgument;
+            };
+
+            if (std.meta.stringToEnum(SceneId, val_str)) |id| {
+                scene_id = id;
+            } else {
+                print("Error: unknown scene '{s}'. The available options are:\n", .{val_str});
+                const fields = @typeInfo(SceneId).@"enum".fields;
+                inline for (fields) |field| {
+                    print("- {s}\n", .{field.name});
+                }
+
+                return error.InvalidArgumentValue;
+            }
+        }
+        else if (std.mem.eql(u8, arg_name, "--img-height")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                print("Error: missing value for '{s}'.\n", .{arg_name});
+                return error.MissingArgument;
+            };
+            render_settings.image_height = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
+                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
+                }
+                return err;
+            };
+        }
+        else if (std.mem.eql(u8, arg_name, "--img-width")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                print("Error: missing value for '{s}'.\n", .{arg_name});
+                return error.MissingArgument;
+            };
+            render_settings.image_width = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
+                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
+                }
+                return err;
+            };
+        }
+        else if (std.mem.eql(u8, arg_name, "--max-bounces")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                print("Error: missing value for '{s}'.\n", .{arg_name});
+                return error.MissingArgument;
+            };
+            render_settings.max_ray_bounces = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
+                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
+                }
+                return err;
+            };
+        }
+        else if (std.mem.eql(u8, arg_name, "--samples")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                print("Error: missing value for '{s}'.\n", .{arg_name});
+                return error.MissingArgumentValue;
+            };
+            render_settings.samples_per_pixel = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
+                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
+                }
+                return err;
+            };
+            render_settings.pixel_samples_scale = 1.0 / @as(Float, @floatFromInt(render_settings.samples_per_pixel));
+        }
+        else if (std.mem.eql(u8, arg_name, "--track-progress")) {
+            if (arg_val != null) {
+                print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?});
+                return error.UnexpectedArgumentValue;
+            }
+            track_progress = true;
+        }
+        else if (std.mem.eql(u8, arg_name, "--time-report")) {
+            if (arg_val != null) {
+                print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?});
+                return error.UnexpectedArgumentValue;
+            }
+            time_report = true;
+        }
+        else if (std.mem.eql(u8, arg_name, "--help")) {
+            if (arg_val != null) {
+                print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?});
+                return error.UnexpectedArgumentValue;
+            }
+
+            const u16Max = std.math.maxInt(u16);
+            print(HELP_FMT_STR, .{u16Max, u16Max, u16Max, u16Max});
+            return;
+        }
+        else {
+            print("Error: unknown argument '{s}'.\n", .{arg_name});
+            return error.UnknownArgument;
+        }
+    }
+
+    const root_node: ?std.Progress.Node = if (track_progress) std.Progress.start(init.io, .{ .root_name = "Scene Render" }) else null;
+    defer if (root_node) |n| n.end();
+
     const cwd = std.Io.Dir.cwd();
     const file = try createImgFile(init.io, cwd, FILE_PATH);
     defer file.close(init.io);
@@ -43,34 +255,77 @@ pub fn main(init: std.process.Init) !void {
     };
     defer memory_map.destroy(init.io);
 
-    var gpa = std.heap.DebugAllocator(.{}) {};
-    defer if (gpa.deinit() == .leak) {
-        @panic("Memory leak detected!");
-    };
+    switch (renderer_type) {
+        .Parallel => {
+            if (comptime !builtin.single_threaded) {
+                var threaded = std.Io.Threaded.init(allocator, .{});
+                defer threaded.deinit();
 
-    const allocator = gpa.allocator();
-
-    // try initAndRenderSpheresScene(init.io, allocator, memory_map.memory);
-    // try initAndRenderQuadsScene(init.io, allocator, memory_map.memory);
-    // try initAndRenderSimpleLightScene(init.io, allocator, memory_map.memory);
-    try initAndRenderCornellBox(init.io, allocator, memory_map.memory);
+                const renderer = ParallelPathTracer {
+                    .settings = render_settings,
+                    .io = threaded.io(),
+                    .progress_root_node = root_node
+                };
+                try initAndRenderScene(init.io, allocator, scene_id, renderer, render_settings, memory_map.memory, time_report);
+            }
+            else unreachable;
+        },
+        .Serial => {
+            const renderer = SerialPathTracer {
+                .settings = render_settings,
+                .progress_root_node = root_node
+            };
+            try initAndRenderScene(init.io, allocator, scene_id, renderer, render_settings, memory_map.memory, time_report);
+        }
+    }
 
     try memory_map.write(init.io);
 }
 
-fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
-    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Spheres Scene" }) else null;
-    defer if (root_node) |n| n.end();
+fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+    assertAnytypeHasDecls(renderer, &.{ "render" });
+    switch (scene_id) {
+        .ProceduralSpheres => try initAndRenderSpheresScene(io, gpa, renderer, render_settings, out_buf, time_report),
+        .CornellBox => try initAndRenderCornellBox(io, gpa, renderer, render_settings, out_buf, time_report),
+        .Quads => try initAndRenderQuadsScene(io, gpa, renderer, render_settings, out_buf, time_report),
+    }
+}
 
-    const render_settings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT,
-        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
-        .max_ray_bounces = 50,
-        .samples_per_pixel = 500,
-        .pixel_samples_scale = 0.002, // 1/samples_per_pixel
-    };
+fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
+    const writer = &buf_writer;
+    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
 
+    var time_start: std.Io.Timestamp = undefined;
+    var time_end: std.Io.Timestamp = undefined;
+    var duration: i96 = undefined;
+
+    print("Render started.\n", .{});
+    if (time_report) time_start = std.Io.Clock.awake.now(io);
+
+    const result_type = @TypeOf(renderer.render(scene, out_buf[PPM_HEADER_LEN..]));
+    if (@typeInfo(result_type) == .error_union) {
+        try renderer.render(scene, out_buf[PPM_HEADER_LEN..]);
+    }
+    else {
+        renderer.render(scene, out_buf[PPM_HEADER_LEN..]);
+    }
+
+    if (time_report) {
+        time_end = std.Io.Clock.awake.now(io);
+        duration = time_start.durationTo(time_end).toNanoseconds();
+    }
+
+    print("Render completed successfully.\n", .{});
+    if (time_report) {
+        print("Elapsed time: {}s, ({}ms).\n", .{
+            @divTrunc(duration, std.time.ns_per_s),
+            @divTrunc(duration, std.time.ns_per_ms),
+        });
+    }
+}
+
+fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     const camera = Camera.initLookAt(
         .init(13.0, 2.0, 3.0),
         .init(0.0, 0.0, 0.0),
@@ -159,76 +414,11 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) 
         }
     }
 
-    // const serial_raytracer = RayTracer {
-    //     .settings = render_settings,
-    //     .progress_root_node = root_node
-    // };
-
-    var threaded = std.Io.Threaded.init(gpa, .{});
-    defer threaded.deinit();
-    const parallel_raytracer = ParallelPathTracer {
-        .settings = render_settings,
-        .io = threaded.io(),
-        .progress_root_node = root_node
-    };
-
-    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
-    const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-
-    var time_start: std.Io.Timestamp = undefined;
-    var time_end: std.Io.Timestamp = undefined;
-
-    time_start = std.Io.Clock.awake.now(io);
-    // serial_raytracer.render(scene, memory_map.memory[PPM_HEADER_LEN..]);
-    time_end = std.Io.Clock.awake.now(io);
-    const serial_duration = time_start.durationTo(time_end).toNanoseconds();
-
-    time_start = std.Io.Clock.awake.now(io);
-    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
-    time_end = std.Io.Clock.awake.now(io);
-    const parallel_duration = time_start.durationTo(time_end).toNanoseconds();
-
     try scene.buildBvh(4);
-
-    time_start = std.Io.Clock.awake.now(io);
-    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
-    time_end = std.Io.Clock.awake.now(io);
-
-    const parallel_bvh_duration = time_start.durationTo(time_end).toNanoseconds();
-
-    print(
-        \\
-        \\ ====== EXECUTION TIME COMPARISON ======
-        \\ Serial Execution: {} ms.
-        \\ Parallel Execution: {} ms.
-        \\ Parallel with BVH Execution: {} ms.
-        \\ Serial/Parallel Speedup: {d:.2}.
-        \\ Parallel/Parallel with BVH Speedup: {d:.2}.
-        \\ =======================================
-        \\
-    , .{
-        @divTrunc(serial_duration, std.time.ns_per_ms),
-        @divTrunc(parallel_duration, std.time.ns_per_ms),
-        @divTrunc(parallel_bvh_duration, std.time.ns_per_ms),
-        @as(f128, @floatFromInt(serial_duration)) / @as(f128, @floatFromInt(parallel_duration)),
-        @as(f128, @floatFromInt(parallel_duration)) / @as(f128, @floatFromInt(parallel_bvh_duration))
-    });
+    try executeRender(io, &scene, renderer, render_settings, out_buf, time_report);
 }
 
-fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
-    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Quads scene" }) else null;
-    defer if (root_node) |n| n.end();
-
-    const render_settings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT,
-        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
-        .max_ray_bounces = 50,
-        .samples_per_pixel = 100,
-        .pixel_samples_scale = 0.01, // 1/samples_per_pixel
-    };
-
+fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     const camera = Camera.initLookAt(
         .init(0.0, 0.0, 9.0),
         .init(0.0, 0.0, 0.0),
@@ -279,94 +469,18 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     ));
 
     try scene.buildBvh(1);
-
-    var threaded = std.Io.Threaded.init(gpa, .{});
-    defer threaded.deinit();
-    const parallel_raytracer = ParallelPathTracer {
-        .settings = render_settings,
-        .io = threaded.io(),
-        .progress_root_node = root_node
-    };
-
-    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
-    const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-
-    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
-    print("Render completed successfully.\n", .{});
+    try executeRender(io, &scene, renderer, render_settings, out_buf, time_report);
 }
 
-fn initAndRenderSimpleLightScene(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
-    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Simple light scene" }) else null;
-    defer if (root_node) |n| n.end();
-
-    const render_settings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT,
-        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
-        .max_ray_bounces = 50,
-        .samples_per_pixel = 100,
-        .pixel_samples_scale = 0.01, // 1/samples_per_pixel
-    };
-
-    const camera = Camera.initLookAt(
-        .init(26.0, 3.0, 6.0),
-        .init(0.0, 2.0, 0.0),
-        20.0,
-        10.0,
-        0.0,
-        render_settings);
-    var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 3);
-    defer scene.deinit();
-
-    // Materials
-    const sphere_mat = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.7, 0.7, 0.7) } });
-    const ground_mat = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.6, 0.6, 0.6) } });
-    const light_mat  = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(4.0, 4.0, 4.0) } });
-
-    // Primitives
-    try scene.add(Hittable.createSphere(.init(0.0, -1000.0, 0.0), 1000.0, ground_mat));
-    try scene.add(Hittable.createSphere(.init(0.0, 2.0, 0.0), 2.0, sphere_mat));
-    try scene.add(Hittable.createQuad(.init(3.0, 1.0, -2.0), .init(2.0, 0.0, 0.0), .init(0.0, 2.0, 0.0), light_mat));
-
-    try scene.buildBvh(1);
-
-    var threaded = std.Io.Threaded.init(gpa, .{});
-    defer threaded.deinit();
-    const parallel_raytracer = ParallelPathTracer {
-        .settings = render_settings,
-        .io = threaded.io(),
-        .progress_root_node = root_node
-    };
-
-    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
-    const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-
-    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
-    print("Render completed successfully.\n", .{});
-}
-
-fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !void {
-    const root_node: ?std.Progress.Node = if (TRACK_PROGRESS) std.Progress.start(io, .{ .root_name = "Cornell box scene" }) else null;
-    defer if (root_node) |n| n.end();
-
-    const render_settings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT,
-        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
-        .max_ray_bounces = 50,
-        .samples_per_pixel = 200, // 2000,
-        .pixel_samples_scale = 0.005, // 0.0005, // 1/samples_per_pixel
-    };
-
+fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     const camera = Camera.initLookAt(
         .init(278.0, 278.0, -800.0),
         .init(278.0, 278.0, 0.0),
         40.0,
         10.0,
         0.0,
-        render_settings);
+        render_settings
+    );
     var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 8);
     defer scene.deinit();
 
@@ -394,21 +508,7 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, out_buf: []u8) !v
     try scene.add(sphere);
 
     try scene.buildBvh(1);
-
-    var threaded = std.Io.Threaded.init(gpa, .{});
-    defer threaded.deinit();
-    const parallel_raytracer = ParallelPathTracer {
-        .settings = render_settings,
-        .io = threaded.io(),
-        .progress_root_node = root_node
-    };
-
-    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
-    const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-
-    try parallel_raytracer.render(&scene, out_buf[PPM_HEADER_LEN..]);
-    print("Render completed successfully.\n", .{});
+    try executeRender(io, &scene, renderer, render_settings, out_buf, time_report);
 }
 
 test {

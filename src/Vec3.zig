@@ -2,7 +2,7 @@ const Vec3 = @This();
 
 const std = @import("std");
 const math_utils = @import("math_utils.zig");
-const Float = @import("config.zig").Float;
+const Float = @import("global_config.zig").Float;
 
 const rescaleFloat = math_utils.rescaleFloat;
 

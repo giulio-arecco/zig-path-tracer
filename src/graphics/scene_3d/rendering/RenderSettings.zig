@@ -4,13 +4,13 @@ const config = @import("../../../global_config.zig");
 const Float = config.Float;
 const Interval = @import("../../../math_utils.zig").Interval(Float);
 
-image_width: u16,
-image_height: u16,
-ray_t_range: Interval,
-max_ray_bounces: u16,
-samples_per_pixel: u16,
+image_width: u16 = 600,
+image_height: u16 = 600,
+ray_t_range: Interval = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
+max_ray_bounces: u16 = 50,
+samples_per_pixel: u16 = 200,
 /// Color scale factor for a sum of pixel samples. A value of `1.0 / samples_per_pixel` leads to the pixel color being the average of the sampled colors.
-pixel_samples_scale: Float,
+pixel_samples_scale: Float = 1.0 / @as(Float, @floatFromInt(200)), // 1/samples_per_pixel
 
 pub fn getAspectRatio(self: RenderSettings) f32 {
     const f_width: f32 = @floatFromInt(self.image_width);

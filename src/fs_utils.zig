@@ -20,7 +20,7 @@ fn computePathStrLen(comptime path_components: []const []const u8) usize {
     return len;
 }
 
-pub fn computePpmP6HeaderSize(comptime max_size: u16, comptime img_width: usize, comptime img_height: usize) usize {
+pub fn computePpmP6HeaderSize(max_size: u16, img_width: usize, img_height: usize) usize {
     return std.fmt.count("P6\n{d} {d}\n{d}\n", .{ img_width, img_height, max_size });
 }
 

@@ -10,6 +10,9 @@ const materials = graphics.scene_3d.materials;
 const math_utils = @import("math_utils.zig");
 
 const Vec3 = @import("Vec3.zig");
+const SceneId = config.SceneId;
+const RendererType = config.RendererType;
+const AppConfig = config.AppConfig;
 const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
@@ -24,69 +27,72 @@ const print = std.debug.print;
 const createImgFile = fs_utils.createImgFile;
 const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
 
-const HELP_FMT_STR: []const u8 =
-            \\ Whenever an argument expects a value, it can be provided either with the syntax --<argument>=<value> or --<argument> <value>.
-            \\ Available arguments:
-            \\ --renderer
-            \\     Choose the rendering algorithm.
-            \\     Defaults to Parallel if your system supports multi-threading, Serial otherwise.
-            \\     Available values:
-            \\         - Serial
-            \\         - Parallel
-            \\
-            \\ --scene
-            \\     Choose the scene to render.
-            \\     Defaults to CornellBox.
-            \\     Available values:
-            \\         - ProceduralSpheres
-            \\         - CornellBox
-            \\         - Quads
-            \\
-            \\ --img-height
-            \\     Choose the output image height.
-            \\     Defaults to 600.
-            \\     Available values:
-            \\         - Any integer between 0 and {}.
-            \\
-            \\ --img-width
-            \\     Choose the output image width.
-            \\     Defaults to 600.
-            \\     Available values:
-            \\         - Any integer between 0 and {}.
-            \\
-            \\ --max-bounces
-            \\     Choose the maximum number of traced ray bounces before stopping the recursion.
-            \\     Defaults to 50.
-            \\     Available values:
-            \\         - Any integer between 0 and {}.
-            \\
-            \\ --samples
-            \\     Choose how many times a pixel is sampled (i.e. how many rays are sent through a single pixel).
-            \\     Defaults to 200.
-            \\     Available values:
-            \\         - Any integer between 0 and {}.
-            \\
-            \\ --track-progress
-            \\     Log the rendering progress (rendered image rows / total image rows).
-            \\     Defaults to false.
-            \\     This argument acts as a toggle, so it does not require any value.
-            \\
-            \\ --time-report
-            \\     Log the rendering time once it completes.
-            \\     Defaults to false.
-            \\     This argument acts as a toggle, so it does not require any value.
-            \\
-;
+const ArgHelp = struct {
+    name: []const u8,
+    desc: []const u8,
+    default: ?[]const u8 = null,
+    values:  ?[]const []const u8 = null,
+};
 
-const IMG_WIDTH = 600;
-const IMG_HEIGHT= 600;
+const u16Max = std.math.maxInt(u16);
+const default_config = AppConfig{};
+const img_out_paths: []const []const u8 = &.{"renders", "output.ppm"};
+const file_path = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(img_out_paths)});
 
-const IMG_OUT_PATHS: []const []const u8 = &.{"renders", "output.ppm"};
-const FILE_PATH = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(IMG_OUT_PATHS)});
-const PPM_HEADER_LEN = fs_utils.computePpmP6HeaderSize(255, IMG_WIDTH, IMG_HEIGHT);
-
-const SceneId = enum { ProceduralSpheres, CornellBox, Quads };
-const RendererType = enum { Serial, Parallel };
+const help_entries = [_]ArgHelp {
+    .{
+        .name = "--renderer",
+        .desc = "Choose the rendering algorithm.",
+        .default = "Parallel if your system supports multi-threading, Serial otherwise",
+        .values = &.{ "Serial", "Parallel" }
+    },
+    .{
+        .name = "--scene",
+        .desc = "Choose the scene to render.",
+        .default = std.fmt.comptimePrint("{t}", .{default_config.scene_id}),
+        .values = &.{ "ProceduralSpheres", "CornellBox", "Quads" }
+    },
+    .{
+        .name = "--img_height",
+        .desc = "Choose the output image height.",
+        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.image_height}),
+        .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
+    },
+    .{
+        .name = "--img_width",
+        .desc = "Choose the output image width.",
+        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.image_width}),
+        .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
+    },
+    .{
+        .name = "--max-bounces",
+        .desc = "Choose the maximum number of traced ray bounces before stopping the recursion.",
+        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.max_ray_bounces}),
+        .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
+    },
+    .{
+        .name = "--samples",
+        .desc = "Choose how many times each pixel is sampled (i.e. how many rays are sent through each pixel).",
+        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.samples_per_pixel}),
+        .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
+    },
+    .{
+        .name = "--track-progress",
+        .desc =
+            \\Track the rendering progress (rendered image rows / total image rows).
+            \\This argument acts as a toggle, therefore it does not require any value.
+        ,
+        .default = std.fmt.comptimePrint("{}", .{default_config.track_progress}),
+    },
+    .{
+        .name = "--time-report",
+        .desc =
+            \\Log the rendering time once it's finished.
+            \\This argument acts as a toggle, therefore it does not require any value.
+        ,
+        .default = std.fmt.comptimePrint("{}", .{default_config.time_report}),
+    }
+};
 
 pub fn main(init: std.process.Init) !void {
     // var gpa = std.heap.DebugAllocator(.{}) {};
@@ -95,167 +101,45 @@ pub fn main(init: std.process.Init) !void {
     // };
     const allocator = init.arena.allocator();
 
-    var render_settings = RenderSettings {
-        .image_width = IMG_WIDTH,
-        .image_height = IMG_HEIGHT,
-        .ray_t_range = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
-        .max_ray_bounces = 50,
-        .samples_per_pixel = 200, // 2000,
-        .pixel_samples_scale = 0.005, // 0.0005, // 1/samples_per_pixel
-    };
-    var track_progress = false;
-    var time_report = false;
-    var scene_id: SceneId = .CornellBox;
-    var renderer_type: RendererType = if (builtin.single_threaded) .Serial else .Parallel;
+    // Parse args
+    var buffer: [16]u8 = undefined;
+    const locked_stderr = try init.io.lockStderr(&buffer, null);
 
     var args_it = try init.minimal.args.iterateAllocator(allocator);
-    defer args_it.deinit();
-    _ = args_it.skip(); // Skip the executable name
 
-    while(args_it.next()) |arg| {
-        var split_it = std.mem.splitScalar(u8, arg, '=');
-        const arg_name = split_it.first();
-        const arg_val = split_it.next();
+    const app_config = try parseArgs(&args_it, locked_stderr.terminal()) orelse return;
+    const render_settings = app_config.render_settings;
+    init.io.unlockStderr();
+    args_it.deinit();
 
-        if (std.mem.eql(u8, arg_name, "--renderer")) {
-            const val_str = arg_val orelse args_it.next() orelse {
-                print("Error: missing value for '{s}'.\n", .{arg_name});
-                return error.MissingArgument;
-            };
-
-            if (std.meta.stringToEnum(RendererType, val_str)) |r| {
-                if (r == .Parallel and builtin.single_threaded) {
-                    print("Error: your system is single-threaded, therefore it can't run the '{s}' algorithm.\n", .{val_str});
-                    return error.ConcurrencyNotAvailable;
-                }
-                renderer_type = r;
-            } else {
-                print("Error: unknown renderer '{s}'. The available options are:\n", .{val_str});
-                const fields = @typeInfo(RendererType).@"enum".fields;
-                inline for (fields) |field| {
-                    print("- {s}\n", .{field.name});
-                }
-
-                return error.InvalidArgumentValue;
-            }
-        }
-        else if (std.mem.eql(u8, arg_name, "--scene")) {
-            const val_str = arg_val orelse args_it.next() orelse {
-                print("Error: missing value for '{s}'.\n", .{arg_name});
-                return error.MissingArgument;
-            };
-
-            if (std.meta.stringToEnum(SceneId, val_str)) |id| {
-                scene_id = id;
-            } else {
-                print("Error: unknown scene '{s}'. The available options are:\n", .{val_str});
-                const fields = @typeInfo(SceneId).@"enum".fields;
-                inline for (fields) |field| {
-                    print("- {s}\n", .{field.name});
-                }
-
-                return error.InvalidArgumentValue;
-            }
-        }
-        else if (std.mem.eql(u8, arg_name, "--img-height")) {
-            const val_str = arg_val orelse args_it.next() orelse {
-                print("Error: missing value for '{s}'.\n", .{arg_name});
-                return error.MissingArgument;
-            };
-            render_settings.image_height = std.fmt.parseInt(u16, val_str, 10) catch |err| {
-                switch (err) {
-                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
-                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
-                }
-                return err;
-            };
-        }
-        else if (std.mem.eql(u8, arg_name, "--img-width")) {
-            const val_str = arg_val orelse args_it.next() orelse {
-                print("Error: missing value for '{s}'.\n", .{arg_name});
-                return error.MissingArgument;
-            };
-            render_settings.image_width = std.fmt.parseInt(u16, val_str, 10) catch |err| {
-                switch (err) {
-                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
-                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
-                }
-                return err;
-            };
-        }
-        else if (std.mem.eql(u8, arg_name, "--max-bounces")) {
-            const val_str = arg_val orelse args_it.next() orelse {
-                print("Error: missing value for '{s}'.\n", .{arg_name});
-                return error.MissingArgument;
-            };
-            render_settings.max_ray_bounces = std.fmt.parseInt(u16, val_str, 10) catch |err| {
-                switch (err) {
-                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
-                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
-                }
-                return err;
-            };
-        }
-        else if (std.mem.eql(u8, arg_name, "--samples")) {
-            const val_str = arg_val orelse args_it.next() orelse {
-                print("Error: missing value for '{s}'.\n", .{arg_name});
-                return error.MissingArgumentValue;
-            };
-            render_settings.samples_per_pixel = std.fmt.parseInt(u16, val_str, 10) catch |err| {
-                switch (err) {
-                    error.Overflow => print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, std.math.maxInt(u16)}),
-                    error.InvalidCharacter => print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}),
-                }
-                return err;
-            };
-            render_settings.pixel_samples_scale = 1.0 / @as(Float, @floatFromInt(render_settings.samples_per_pixel));
-        }
-        else if (std.mem.eql(u8, arg_name, "--track-progress")) {
-            if (arg_val != null) {
-                print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?});
-                return error.UnexpectedArgumentValue;
-            }
-            track_progress = true;
-        }
-        else if (std.mem.eql(u8, arg_name, "--time-report")) {
-            if (arg_val != null) {
-                print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?});
-                return error.UnexpectedArgumentValue;
-            }
-            time_report = true;
-        }
-        else if (std.mem.eql(u8, arg_name, "--help")) {
-            if (arg_val != null) {
-                print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?});
-                return error.UnexpectedArgumentValue;
-            }
-
-            const u16Max = std.math.maxInt(u16);
-            print(HELP_FMT_STR, .{u16Max, u16Max, u16Max, u16Max});
-            return;
-        }
-        else {
-            print("Error: unknown argument '{s}'.\n", .{arg_name});
-            return error.UnknownArgument;
-        }
-    }
-
-    const root_node: ?std.Progress.Node = if (track_progress) std.Progress.start(init.io, .{ .root_name = "Scene Render" }) else null;
+    // Progress tracking
+    const root_node: ?std.Progress.Node = if (app_config.track_progress) std.Progress.start(init.io, .{ .root_name = "Scene Render" }) else null;
     defer if (root_node) |n| n.end();
 
+    // Create and setup output file and memory map
     const cwd = std.Io.Dir.cwd();
-    const file = try createImgFile(init.io, cwd, FILE_PATH);
+    const file = try createImgFile(init.io, cwd, file_path);
     defer file.close(init.io);
 
+    const ppm_header_len = fs_utils.computePpmP6HeaderSize(255, render_settings.image_width, render_settings.image_height);
     var memory_map = blk: {
-        try file.setLength(init.io, PPM_HEADER_LEN + IMG_HEIGHT * IMG_WIDTH * 3);
+        const height: usize = render_settings.image_height;
+        const width: usize = render_settings.image_width;
+        const total_size = ppm_header_len + (height * width * 3);
+
+        try file.setLength(init.io, total_size);
         const stat = try file.stat(init.io);
 
         break :blk try file.createMemoryMap(init.io, .{.len = stat.size });
     };
     defer memory_map.destroy(init.io);
 
-    switch (renderer_type) {
+    var buf_writer = std.Io.Writer.fixed(memory_map.memory[0..ppm_header_len]);
+    const writer = &buf_writer;
+    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
+
+    // Choose rendering algorithm, init scene and start render
+    switch (app_config.renderer_type) {
         .Parallel => {
             if (comptime !builtin.single_threaded) {
                 var threaded = std.Io.Threaded.init(allocator, .{});
@@ -266,7 +150,7 @@ pub fn main(init: std.process.Init) !void {
                     .io = threaded.io(),
                     .progress_root_node = root_node
                 };
-                try initAndRenderScene(init.io, allocator, scene_id, renderer, render_settings, memory_map.memory, time_report);
+                try initAndRenderScene(init.io, allocator, app_config.scene_id, renderer, render_settings, memory_map.memory[ppm_header_len..], app_config.time_report);
             }
             else unreachable;
         },
@@ -275,11 +159,148 @@ pub fn main(init: std.process.Init) !void {
                 .settings = render_settings,
                 .progress_root_node = root_node
             };
-            try initAndRenderScene(init.io, allocator, scene_id, renderer, render_settings, memory_map.memory, time_report);
+            try initAndRenderScene(init.io, allocator, app_config.scene_id, renderer, render_settings, memory_map.memory[ppm_header_len..], app_config.time_report);
         }
     }
 
     try memory_map.write(init.io);
+}
+
+fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
+    assertAnytypeHasDecls(args_it, &.{ "skip", "next" });
+
+    var app_config = AppConfig{};
+    const w = term.writer;
+
+    _ = args_it.skip(); // Skip the executable name
+    while(args_it.next()) |arg| {
+        var split_it = std.mem.splitScalar(u8, arg, '=');
+        const arg_name = split_it.first();
+        const arg_val = split_it.next();
+
+        if (std.mem.eql(u8, arg_name, "--renderer")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgument;
+            };
+
+            if (std.meta.stringToEnum(RendererType, val_str)) |r| {
+                if (r == .Parallel and builtin.single_threaded) {
+                    w.print("Error: your system is single-threaded, therefore it can't run the '{s}' algorithm.\n", .{val_str}) catch {};
+                    return error.ConcurrencyNotAvailable;
+                }
+                app_config.renderer_type = r;
+            } else {
+                w.print("Error: unknown renderer '{s}'. The available options are:\n", .{val_str}) catch {};
+                const fields = @typeInfo(RendererType).@"enum".fields;
+                inline for (fields) |field| {
+                    w.print("- {s}\n", .{field.name}) catch {};
+                }
+
+                return error.InvalidArgumentValue;
+            }
+        }
+        else if (std.mem.eql(u8, arg_name, "--scene")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgument;
+            };
+
+            if (std.meta.stringToEnum(SceneId, val_str)) |id| {
+                app_config.scene_id = id;
+            } else {
+                w.print("Error: unknown scene '{s}'. The available options are:\n", .{val_str}) catch {};
+                const fields = @typeInfo(SceneId).@"enum".fields;
+                inline for (fields) |field| {
+                    w.print("- {s}\n", .{field.name}) catch {};
+                }
+
+                return error.InvalidArgumentValue;
+            }
+        }
+        else if (std.mem.eql(u8, arg_name, "--img-height")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgument;
+            };
+            app_config.render_settings.image_height = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
+                    error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
+                }
+                return err;
+            };
+        }
+        else if (std.mem.eql(u8, arg_name, "--img-width")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgument;
+            };
+            app_config.render_settings.image_width = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
+                    error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
+                }
+                return err;
+            };
+        }
+        else if (std.mem.eql(u8, arg_name, "--max-bounces")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgument;
+            };
+            app_config.render_settings.max_ray_bounces = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
+                    error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
+                }
+                return err;
+            };
+        }
+        else if (std.mem.eql(u8, arg_name, "--samples")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgumentValue;
+            };
+            app_config.render_settings.samples_per_pixel = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+                switch (err) {
+                    error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
+                    error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
+                }
+                return err;
+            };
+            app_config.render_settings.pixel_samples_scale = 1.0 / @as(Float, @floatFromInt(app_config.render_settings.samples_per_pixel));
+        }
+        else if (std.mem.eql(u8, arg_name, "--track-progress")) {
+            if (arg_val != null) {
+                w.print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?}) catch {};
+                return error.UnexpectedArgumentValue;
+            }
+            app_config.track_progress = true;
+        }
+        else if (std.mem.eql(u8, arg_name, "--time-report")) {
+            if (arg_val != null) {
+                w.print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?}) catch {};
+                return error.UnexpectedArgumentValue;
+            }
+            app_config.time_report = true;
+        }
+        else if (std.mem.eql(u8, arg_name, "--help")) {
+            if (arg_val != null) {
+                w.print("Error: the argument '{s}' does not require a value, found '{s}'.\n", .{arg_name, arg_val.?}) catch {};
+                return error.UnexpectedArgumentValue;
+            }
+
+            printHelp(term);
+            return null;
+        }
+        else {
+            w.print("Error: unknown argument '{s}'.\n", .{arg_name}) catch {};
+            return error.UnknownArgument;
+        }
+    }
+
+    return app_config;
 }
 
 fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
@@ -291,11 +312,7 @@ fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, ren
     }
 }
 
-fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
-    var buf_writer = std.Io.Writer.fixed(out_buf[0..PPM_HEADER_LEN]);
-    const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
-
+fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, out_buf: []u8, time_report: bool) !void {
     var time_start: std.Io.Timestamp = undefined;
     var time_end: std.Io.Timestamp = undefined;
     var duration: i96 = undefined;
@@ -303,12 +320,12 @@ fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, render_sett
     print("Render started.\n", .{});
     if (time_report) time_start = std.Io.Clock.awake.now(io);
 
-    const result_type = @TypeOf(renderer.render(scene, out_buf[PPM_HEADER_LEN..]));
+    const result_type = @TypeOf(renderer.render(scene, out_buf));
     if (@typeInfo(result_type) == .error_union) {
-        try renderer.render(scene, out_buf[PPM_HEADER_LEN..]);
+        try renderer.render(scene, out_buf);
     }
     else {
-        renderer.render(scene, out_buf[PPM_HEADER_LEN..]);
+        renderer.render(scene, out_buf);
     }
 
     if (time_report) {
@@ -322,6 +339,58 @@ fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, render_sett
             @divTrunc(duration, std.time.ns_per_s),
             @divTrunc(duration, std.time.ns_per_ms),
         });
+    }
+}
+
+fn printHelp(term: std.Io.Terminal) void {
+    const w = term.writer;
+
+    w.writeAll("Whenever an argument expects a value, it can be provided either with the syntax ") catch {};
+    term.setColor(.bold) catch {};
+    w.writeAll("--<argument>=<value> ") catch {};
+    term.setColor(.reset) catch {};
+    w.writeAll("or ") catch {};
+    term.setColor(.bold) catch {};
+    w.writeAll("--<argument> <value>") catch {};
+    term.setColor(.reset) catch {};
+    w.writeAll(".\nAvailable arguments:\n\n") catch {};
+
+    for (help_entries) |entry| {
+        // Name
+        term.setColor(.bold) catch {};
+        term.setColor(.cyan) catch {};
+        w.print("{s}\n", .{entry.name}) catch {};
+
+        // Description
+        term.setColor(.reset) catch {};
+        var desc_lines = std.mem.splitScalar(u8, entry.desc, '\n');
+        while(desc_lines.next()) |line| {
+            w.print("    {s}\n", .{line}) catch {};
+        }
+
+
+        // Default
+        if (entry.default) |default| {
+            w.writeAll("    Defaults to: ") catch {};
+            term.setColor(.bright_white) catch {};
+            w.print("{s}", .{default}) catch {};
+            term.setColor(.reset) catch {};
+            w.writeAll(".\n") catch {};
+        }
+
+        // Values
+        if (entry.values) |values| {
+            w.writeAll("    Available values:\n") catch {};
+
+            for (values) |value| {
+                w.writeAll("      - ") catch {};
+                term.setColor(.yellow) catch {};
+                w.print("{s}\n", .{value}) catch {};
+                term.setColor(.reset) catch {};
+            }
+        }
+
+        w.writeAll("\n") catch {};
     }
 }
 
@@ -415,7 +484,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: anyty
     }
 
     try scene.buildBvh(4);
-    try executeRender(io, &scene, renderer, render_settings, out_buf, time_report);
+    try executeRender(io, &scene, renderer, out_buf, time_report);
 }
 
 fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
@@ -469,7 +538,7 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype
     ));
 
     try scene.buildBvh(1);
-    try executeRender(io, &scene, renderer, render_settings, out_buf, time_report);
+    try executeRender(io, &scene, renderer, out_buf, time_report);
 }
 
 fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
@@ -508,7 +577,7 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: anytype
     try scene.add(sphere);
 
     try scene.buildBvh(1);
-    try executeRender(io, &scene, renderer, render_settings, out_buf, time_report);
+    try executeRender(io, &scene, renderer, out_buf, time_report);
 }
 
 test {
@@ -517,3 +586,165 @@ test {
     _ = @import("graphics.zig");
     _ = @import("Vec3.zig");
 }
+
+const testing = std.testing;
+
+const MockArgIterator = struct {
+    args: []const []const u8,
+    index: usize = 0,
+
+    pub fn skip(self: *@This()) bool {
+        if (self.index < self.args.len) {
+            self.index += 1;
+            return true;
+        }
+        return false;
+    }
+
+    pub fn next(self: *@This()) ?[]const u8 {
+        if (self.index < self.args.len) {
+            const arg = self.args[self.index];
+            self.index += 1;
+            return arg;
+        }
+        return null;
+    }
+};
+
+fn getMockTerminal() std.Io.Terminal {
+    const MockStorage = struct {
+        var buf: [4]u8 = undefined;
+        var discarding: std.Io.Writer.Discarding = std.Io.Writer.Discarding.init(&buf);
+    };
+    return .{
+        .writer = &MockStorage.discarding.writer,
+        .mode = .no_color,
+    };
+}
+
+test "parseArgs - default config" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer"} };
+    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    try testing.expect(cfg_opt != null);
+    const cfg = cfg_opt.?;
+    try testing.expectEqual(false, cfg.track_progress);
+    try testing.expectEqual(false, cfg.time_report);
+}
+
+test "parseArgs - valid boolean flags" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--track-progress", "--time-report"} };
+    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    try testing.expect(cfg_opt != null);
+    const cfg = cfg_opt.?;
+    try testing.expect(cfg.track_progress);
+    try testing.expect(cfg.time_report);
+}
+
+test "parseArgs - equal syntax" {
+    var it = MockArgIterator{ .args = &[_][]const u8{
+        "zig-pathtracer",
+        "--renderer=Serial",
+        "--scene=CornellBox",
+        "--img-height=720",
+        "--img-width=1280",
+        "--max-bounces=50",
+        "--samples=100"
+    } };
+    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    try testing.expect(cfg_opt != null);
+    const cfg = cfg_opt.?;
+    try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
+    try testing.expectEqual(SceneId.CornellBox, cfg.scene_id);
+    try testing.expectEqual(@as(u16, 720), cfg.render_settings.image_height);
+    try testing.expectEqual(@as(u16, 1280), cfg.render_settings.image_width);
+    try testing.expectEqual(@as(u16, 50), cfg.render_settings.max_ray_bounces);
+    try testing.expectEqual(@as(u16, 100), cfg.render_settings.samples_per_pixel);
+    try testing.expectApproxEqAbs(@as(Float, 0.01), cfg.render_settings.pixel_samples_scale, std.math.floatEps(Float));
+}
+
+test "parseArgs - space syntax" {
+    var it = MockArgIterator{ .args = &[_][]const u8{
+        "zig-pathtracer",
+        "--renderer", "Serial",
+        "--scene", "ProceduralSpheres",
+        "--img-height", "720",
+        "--img-width", "1280",
+        "--max-bounces", "50",
+        "--samples", "100"
+    } };
+    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    try testing.expect(cfg_opt != null);
+    const cfg = cfg_opt.?;
+    try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
+    try testing.expectEqual(SceneId.ProceduralSpheres, cfg.scene_id);
+    try testing.expectEqual(@as(u16, 720), cfg.render_settings.image_height);
+    try testing.expectEqual(@as(u16, 1280), cfg.render_settings.image_width);
+}
+
+test "parseArgs - help" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--help"} };
+    const cfg_opt = try parseArgs(&it, getMockTerminal());
+    try testing.expect(cfg_opt == null);
+}
+
+test "parseArgs - unknown argument" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--unknown-arg"} };
+    try testing.expectError(error.UnknownArgument, parseArgs(&it, getMockTerminal()));
+}
+
+test "parseArgs - missing value" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--renderer"} };
+    try testing.expectError(error.MissingArgument, parseArgs(&it, getMockTerminal()));
+
+    var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--samples"} };
+    try testing.expectError(error.MissingArgumentValue, parseArgs(&it2, getMockTerminal()));
+}
+
+test "parseArgs - invalid integer" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-height=abc"} };
+    try testing.expectError(error.InvalidCharacter, parseArgs(&it, getMockTerminal()));
+}
+
+test "parseArgs - integer overflow" {
+    var it = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-width=999999"} };
+    try testing.expectError(error.Overflow, parseArgs(&it, getMockTerminal()));
+}
+
+test "parseArgs - integer boundary constraints" {
+    // Exact u16 max
+    var it_max = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-height=65535"} };
+    const cfg_opt = try parseArgs(&it_max, getMockTerminal());
+    try testing.expect(cfg_opt != null);
+    try testing.expectEqual(@as(u16, 65535), cfg_opt.?.render_settings.image_height);
+
+    // Negative numbers
+    var it_neg = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-width=-1"} };
+    try testing.expectError(error.Overflow, parseArgs(&it_neg, getMockTerminal()));
+
+    // Zero
+    var it_zero = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--max-bounces=0"} };
+    const cfg_zero_opt = try parseArgs(&it_zero, getMockTerminal());
+    try testing.expect(cfg_zero_opt != null);
+    try testing.expectEqual(@as(u16, 0), cfg_zero_opt.?.render_settings.max_ray_bounces);
+}
+
+test "parseArgs - invalid enum values" {
+    var it1 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--renderer=FakeRenderer"} };
+    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it1, getMockTerminal()));
+
+    var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--scene=FakeScene"} };
+    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it2, getMockTerminal()));
+}
+
+test "parseArgs - unexpected value for time-report, track_progress and help" {
+    var it1 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--time-report=1"} };
+    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it1, getMockTerminal()));
+
+    var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--help=true"} };
+    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it2, getMockTerminal()));
+
+    var it3 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--track-progress=true"} };
+    try testing.expectError(error.UnexpectedArgumentValue, parseArgs(&it3, getMockTerminal()));
+}
+
+

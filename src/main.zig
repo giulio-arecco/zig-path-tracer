@@ -11,13 +11,14 @@ const math_utils = @import("math_utils.zig");
 
 const Vec3 = @import("Vec3.zig");
 const SceneId = config.SceneId;
-const RendererType = config.RendererType;
 const AppConfig = config.AppConfig;
 const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Hittable = graphics.scene_3d.geometry.Hittable;
 const RenderSettings = rendering.RenderSettings;
+const RendererType = raytracing.RendererType;
+const Renderer = raytracing.Renderer;
 const SerialPathTracer = raytracing.SerialPathTracer;
 const ParallelPathTracer = raytracing.ParallelPathTracer;
 const Material = materials.Material;
@@ -35,7 +36,7 @@ const ArgHelp = struct {
 };
 
 const u16Max = std.math.maxInt(u16);
-const default_config = AppConfig{};
+const default_config = config.default_app_config;
 const img_out_paths: []const []const u8 = &.{"renders", "output.ppm"};
 const file_path = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(img_out_paths)});
 
@@ -112,7 +113,7 @@ pub fn main(init: std.process.Init) !void {
     init.io.unlockStderr();
     args_it.deinit();
 
-    // Progress tracking
+    // Setup progress tracking
     const root_node: ?std.Progress.Node = if (app_config.track_progress) std.Progress.start(init.io, .{ .root_name = "Scene Render" }) else null;
     defer if (root_node) |n| n.end();
 
@@ -139,30 +140,35 @@ pub fn main(init: std.process.Init) !void {
     try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
 
     // Choose rendering algorithm, init scene and start render
-    switch (app_config.renderer_type) {
-        .Parallel => {
-            if (comptime !builtin.single_threaded) {
-                var threaded = std.Io.Threaded.init(allocator, .{});
-                defer threaded.deinit();
+    var opt_threaded: ?std.Io.Threaded = null;
+    defer if (opt_threaded) |*t| t.deinit();
 
-                const renderer = ParallelPathTracer {
-                    .settings = render_settings,
-                    .io = threaded.io(),
-                    .progress_root_node = root_node
-                };
-                try initAndRenderScene(init.io, allocator, app_config.scene_id, renderer, render_settings, memory_map.memory[ppm_header_len..], app_config.time_report);
-            }
-            else unreachable;
-        },
-        .Serial => {
-            const renderer = SerialPathTracer {
+    const renderer: Renderer = switch (app_config.renderer_type) {
+        .Parallel => blk: {
+            if (comptime builtin.single_threaded) unreachable;
+
+            opt_threaded = std.Io.Threaded.init(allocator, .{});
+            break :blk .{ .Parallel = .{
+                .io = opt_threaded.?.io(),
                 .settings = render_settings,
                 .progress_root_node = root_node
-            };
-            try initAndRenderScene(init.io, allocator, app_config.scene_id, renderer, render_settings, memory_map.memory[ppm_header_len..], app_config.time_report);
-        }
-    }
+            } };
+        },
+        .Serial => .{ .Serial = .{
+            .settings = render_settings,
+            .progress_root_node = root_node
+        } }
+    };
 
+    try initAndRenderScene(
+        init.io,
+        allocator,
+        app_config.scene_id,
+        renderer,
+        render_settings,
+        memory_map.memory[ppm_header_len..],
+        app_config.time_report
+    );
     try memory_map.write(init.io);
 }
 
@@ -303,7 +309,7 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
     return app_config;
 }
 
-fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     assertAnytypeHasDecls(renderer, &.{ "render" });
     switch (scene_id) {
         .ProceduralSpheres => try initAndRenderSpheresScene(io, gpa, renderer, render_settings, out_buf, time_report),
@@ -312,7 +318,7 @@ fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, ren
     }
 }
 
-fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, out_buf: []u8, time_report: bool) !void {
+fn executeRender(io: std.Io, scene: *const Scene, renderer: Renderer, out_buf: []u8, time_report: bool) !void {
     var time_start: std.Io.Timestamp = undefined;
     var time_end: std.Io.Timestamp = undefined;
     var duration: i96 = undefined;
@@ -320,13 +326,7 @@ fn executeRender(io: std.Io, scene: *const Scene, renderer: anytype, out_buf: []
     print("Render started.\n", .{});
     if (time_report) time_start = std.Io.Clock.awake.now(io);
 
-    const result_type = @TypeOf(renderer.render(scene, out_buf));
-    if (@typeInfo(result_type) == .error_union) {
-        try renderer.render(scene, out_buf);
-    }
-    else {
-        renderer.render(scene, out_buf);
-    }
+    try renderer.render(scene, out_buf);
 
     if (time_report) {
         time_end = std.Io.Clock.awake.now(io);
@@ -394,7 +394,7 @@ fn printHelp(term: std.Io.Terminal) void {
     }
 }
 
-fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     const camera = Camera.initLookAt(
         .init(13.0, 2.0, 3.0),
         .init(0.0, 0.0, 0.0),
@@ -487,7 +487,7 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: anyty
     try executeRender(io, &scene, renderer, out_buf, time_report);
 }
 
-fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     const camera = Camera.initLookAt(
         .init(0.0, 0.0, 9.0),
         .init(0.0, 0.0, 0.0),
@@ -541,7 +541,7 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: anytype
     try executeRender(io, &scene, renderer, out_buf, time_report);
 }
 
-fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: anytype, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
     const camera = Camera.initLookAt(
         .init(278.0, 278.0, -800.0),
         .init(278.0, 278.0, 0.0),

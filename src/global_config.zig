@@ -1,9 +1,9 @@
 const builtin = @import("builtin");
 const RenderSettings = @import("graphics/scene_3d/rendering/RenderSettings.zig");
+const RendererType = @import("graphics/scene_3d/rendering/raytracing.zig").RendererType;
 
 pub const Float = f32;
 pub const SceneId = enum { ProceduralSpheres, CornellBox, Quads };
-pub const RendererType = enum { Serial, Parallel };
 
 pub const AppConfig = struct {
     render_settings: RenderSettings = .{},
@@ -12,3 +12,5 @@ pub const AppConfig = struct {
     track_progress: bool = false,
     time_report: bool = false
 };
+
+pub const default_app_config = AppConfig {};

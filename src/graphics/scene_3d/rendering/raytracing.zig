@@ -12,8 +12,23 @@ const Interval = math_utils.Interval(Float);
 const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
+pub const RendererType = enum { Serial, Parallel };
+
+const default_settings = config.default_app_config.render_settings;
+
+pub const Renderer = union(RendererType) {
+    Serial: SerialPathTracer,
+    Parallel: ParallelPathTracer,
+
+    pub fn render(self: Renderer, scene: *const Scene, out: []u8) !void {
+        switch (self) {
+            inline else => |renderer| return renderer.render(scene, out)
+        }
+    }
+};
+
 pub const SerialPathTracer = struct {
-    settings: RenderSettings,
+    settings: RenderSettings = default_settings,
     progress_root_node: ?std.Progress.Node = null,
 
     pub fn render(self: SerialPathTracer, scene: *const Scene, out: []u8) void {
@@ -40,7 +55,7 @@ pub const SerialPathTracer = struct {
 
 pub const ParallelPathTracer = struct {
     io: std.Io,
-    settings: RenderSettings,
+    settings: RenderSettings = default_settings,
     progress_root_node: ?std.Progress.Node = null,
 
     pub fn render(self: ParallelPathTracer, scene: *const Scene, out: []u8) !void {
@@ -74,7 +89,13 @@ pub const ParallelPathTracer = struct {
         const image_width = self.settings.image_width;
 
         const base_seed: u64 = @intFromFloat(@round(camera._pixel_top_left.squaredMagnitude()));
-        var prng: std.Random.DefaultPrng = .init(base_seed +% (@as(u64, y_screen) * 1000));
+
+        // Hash the base seed with the row index to guarantee a strong avalanche effect.
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(std.mem.asBytes(&base_seed));
+        hasher.update(std.mem.asBytes(&y_screen));
+
+        var prng: std.Random.DefaultPrng = .init(hasher.final());
         const random = prng.random();
 
         for (0..image_width) |x_screen| {

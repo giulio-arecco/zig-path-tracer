@@ -15,6 +15,7 @@ const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Hittable = graphics.scene_3d.geometry.Hittable;
+const PipelineContext = rendering.PipelineContext;
 const RenderSettings = rendering.RenderSettings;
 const RendererType = rendering.RendererType;
 const Renderer = rendering.Renderer;
@@ -26,6 +27,7 @@ const Float = config.Float;
 const print = std.debug.print;
 const createImgFile = fs_utils.createImgFile;
 const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
+const executeRenderPipeline = rendering.executeRenderPipeline;
 
 const ArgHelp = struct {
     name: []const u8,
@@ -35,7 +37,7 @@ const ArgHelp = struct {
 };
 
 const u16Max = std.math.maxInt(u16);
-const default_config = config.default_app_config;
+const default_config = AppConfig {};
 const img_out_paths: []const []const u8 = &.{"renders", "output.ppm"};
 const file_path = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(img_out_paths)});
 
@@ -138,7 +140,7 @@ pub fn main(init: std.process.Init) !void {
     const writer = &buf_writer;
     try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
 
-    // Choose rendering algorithm, init scene and start render
+    // Choose rendering algorithm
     var opt_threaded: ?std.Io.Threaded = null;
     defer if (opt_threaded) |*t| t.deinit();
 
@@ -159,15 +161,28 @@ pub fn main(init: std.process.Init) !void {
         } }
     };
 
+    // Create the context for the rendering pipeline
+    const image_size = @as(usize, render_settings.image_width) * @as(usize, render_settings.image_height);
+    const linear_color_buf = try allocator.alloc(LinearColor, image_size);
+    defer allocator.free(linear_color_buf);
+
+    var ctx = PipelineContext {
+        .io = init.io,
+        .renderer = renderer,
+        .scene = undefined,
+        .time_report = app_config.time_report,
+        .linear_color_buf = linear_color_buf,
+        .out_buf = memory_map.memory[ppm_header_len..],
+    };
+
+    // Init the scene and execute the rendering pipeline
     try initAndRenderScene(
-        init.io,
         allocator,
         app_config.scene_id,
-        renderer,
         render_settings,
-        memory_map.memory[ppm_header_len..],
-        app_config.time_report
+        &ctx
     );
+
     try memory_map.write(init.io);
 }
 
@@ -308,36 +323,11 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
     return app_config;
 }
 
-fn initAndRenderScene(io: std.Io, gpa: std.mem.Allocator, scene_id: SceneId, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
-    assertAnytypeHasDecls(renderer, &.{ "render" });
+fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, render_settings: RenderSettings, ctx: *PipelineContext) !void {
     switch (scene_id) {
-        .ProceduralSpheres => try initAndRenderSpheresScene(io, gpa, renderer, render_settings, out_buf, time_report),
-        .CornellBox => try initAndRenderCornellBox(io, gpa, renderer, render_settings, out_buf, time_report),
-        .Quads => try initAndRenderQuadsScene(io, gpa, renderer, render_settings, out_buf, time_report),
-    }
-}
-
-fn executeRender(io: std.Io, scene: *const Scene, renderer: Renderer, out_buf: []u8, time_report: bool) !void {
-    var time_start: std.Io.Timestamp = undefined;
-    var time_end: std.Io.Timestamp = undefined;
-    var duration: i96 = undefined;
-
-    print("Render started.\n", .{});
-    if (time_report) time_start = std.Io.Clock.awake.now(io);
-
-    try renderer.render(scene, out_buf);
-
-    if (time_report) {
-        time_end = std.Io.Clock.awake.now(io);
-        duration = time_start.durationTo(time_end).toNanoseconds();
-    }
-
-    print("Render completed successfully.\n", .{});
-    if (time_report) {
-        print("Elapsed time: {}s, ({}ms).\n", .{
-            @divTrunc(duration, std.time.ns_per_s),
-            @divTrunc(duration, std.time.ns_per_ms),
-        });
+        .ProceduralSpheres => try initAndRenderSpheresScene(gpa, render_settings, ctx),
+        .CornellBox => try initAndRenderCornellBox(gpa, render_settings, ctx),
+        .Quads => try initAndRenderQuadsScene(gpa, render_settings, ctx),
     }
 }
 
@@ -393,7 +383,7 @@ fn printHelp(term: std.Io.Terminal) void {
     }
 }
 
-fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: RenderSettings, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(13.0, 2.0, 3.0),
         .init(0.0, 0.0, 0.0),
@@ -483,10 +473,12 @@ fn initAndRenderSpheresScene(io: std.Io, gpa: std.mem.Allocator, renderer: Rende
     }
 
     try scene.buildBvh(4);
-    try executeRender(io, &scene, renderer, out_buf, time_report);
+
+    ctx.scene = &scene;
+    try executeRenderPipeline(ctx.*);
 }
 
-fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: RenderSettings, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(0.0, 0.0, 9.0),
         .init(0.0, 0.0, 0.0),
@@ -537,10 +529,12 @@ fn initAndRenderQuadsScene(io: std.Io, gpa: std.mem.Allocator, renderer: Rendere
     ));
 
     try scene.buildBvh(1);
-    try executeRender(io, &scene, renderer, out_buf, time_report);
+
+    ctx.scene = &scene;
+    try executeRenderPipeline(ctx.*);
 }
 
-fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: Renderer, render_settings: RenderSettings, out_buf: []u8, time_report: bool) !void {
+fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: RenderSettings, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(278.0, 278.0, -800.0),
         .init(278.0, 278.0, 0.0),
@@ -576,7 +570,9 @@ fn initAndRenderCornellBox(io: std.Io, gpa: std.mem.Allocator, renderer: Rendere
     try scene.add(sphere);
 
     try scene.buildBvh(1);
-    try executeRender(io, &scene, renderer, out_buf, time_report);
+
+    ctx.scene = &scene;
+    try executeRenderPipeline(ctx.*);
 }
 
 test {

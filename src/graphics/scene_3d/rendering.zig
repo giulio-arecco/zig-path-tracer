@@ -7,11 +7,23 @@ const Scene = @import("Scene.zig");
 const Ray = @import("Ray.zig");
 const LinearColor = @import("../LinearColor.zig");
 const Vec3 = @import("../../Vec3.zig");
+const AppConfig = config.AppConfig;
 const Interval = math_utils.Interval(Float);
 const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
+const print = std.debug.print;
+
 pub const RendererType = enum { Serial, Parallel };
+
+pub const PipelineContext = struct {
+    io: std.Io,
+    renderer: Renderer,
+    scene: *const Scene,
+    time_report: bool = false,
+    linear_color_buf: []LinearColor,
+    out_buf: []u8,
+};
 
 pub const RenderSettings = struct {
     image_width: u16 = 600,
@@ -34,9 +46,9 @@ pub const Renderer = union(RendererType) {
     Serial: SerialPathTracer,
     Parallel: ParallelPathTracer,
 
-    pub fn render(self: Renderer, scene: *const Scene, out: []u8) !void {
+    pub fn render(self: Renderer, scene: *const Scene, out_color: []LinearColor) !void {
         switch (self) {
-            inline else => |renderer| return renderer.render(scene, out)
+            inline else => |renderer| return renderer.render(scene, out_color)
         }
     }
 };
@@ -45,7 +57,7 @@ pub const SerialPathTracer = struct {
     settings: RenderSettings = .{},
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: SerialPathTracer, scene: *const Scene, out: []u8) void {
+    pub fn render(self: SerialPathTracer, scene: *const Scene, out_color: []LinearColor) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
@@ -58,8 +70,8 @@ pub const SerialPathTracer = struct {
 
         for (0..image_height) |y_screen| {
             for (0..image_width) |x_screen| {
-                const pixel_byte_index = (y_screen * image_width + x_screen) * 3;
-                colorPixel(self.settings, scene, random, x_screen, y_screen, out[pixel_byte_index..][0..3]);
+                const pixel_color_index = y_screen * image_width + x_screen;
+                colorPixel(self.settings, scene, random, x_screen, y_screen, &out_color[pixel_color_index]);
             }
 
             if (task_node) |n| n.completeOne();
@@ -72,7 +84,7 @@ pub const ParallelPathTracer = struct {
     settings: RenderSettings = .{},
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: ParallelPathTracer, scene: *const Scene, out: []u8) !void {
+    pub fn render(self: ParallelPathTracer, scene: *const Scene, out_color: []LinearColor) !void {
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
 
@@ -83,9 +95,9 @@ pub const ParallelPathTracer = struct {
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
-            const start = y_screen * image_width * 3;
-            const end = start + image_width * 3;
-            const row = out[start..end];
+            const start = y_screen * image_width;
+            const end = start + image_width;
+            const row = out_color[start..end];
 
             group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row, task_node }) catch |err| switch (err) {
                 error.ConcurrencyUnavailable => {
@@ -98,7 +110,7 @@ pub const ParallelPathTracer = struct {
         try group.await(self.io);
     }
 
-    fn renderRow(self: ParallelPathTracer, scene: *const Scene, y_screen: usize, row: []u8, progress_node: ?std.Progress.Node) void {
+    fn renderRow(self: ParallelPathTracer, scene: *const Scene, y_screen: usize, row: []LinearColor, progress_node: ?std.Progress.Node) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
 
@@ -113,15 +125,72 @@ pub const ParallelPathTracer = struct {
         const random = prng.random();
 
         for (0..image_width) |x_screen| {
-            const pixel_byte_index = x_screen * 3;
-            colorPixel(self.settings, scene, random, x_screen, y_screen, row[pixel_byte_index..][0..3]);
+            const pixel_color_index = x_screen;
+            colorPixel(self.settings, scene, random, x_screen, y_screen, &row[pixel_color_index]);
         }
 
         if (progress_node) |n| n.completeOne();
     }
 };
 
-fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out: *[3]u8) void {
+pub fn executeRenderPipeline(ctx: PipelineContext) !void {
+    var time_start: std.Io.Timestamp = undefined;
+    var time_end: std.Io.Timestamp = undefined;
+    var duration: i96 = undefined;
+
+    print("Render started.\n", .{});
+    if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
+
+    try renderStep(ctx.scene, ctx.renderer, ctx.linear_color_buf);
+
+    if (ctx.time_report) {
+        time_end = std.Io.Clock.awake.now(ctx.io);
+        duration = time_start.durationTo(time_end).toNanoseconds();
+    }
+
+    print("Render completed successfully.\n", .{});
+
+    if (ctx.time_report) {
+        print("Render step: {}s, ({}ms).\n", .{
+            @divTrunc(duration, std.time.ns_per_s),
+            @divTrunc(duration, std.time.ns_per_ms),
+        });
+    }
+
+    print("Post-process started.\n", .{});
+    if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
+
+    postProcessStep(ctx.linear_color_buf, ctx.out_buf);
+
+    if (ctx.time_report) {
+        time_end = std.Io.Clock.awake.now(ctx.io);
+        duration = time_start.durationTo(time_end).toNanoseconds();
+    }
+
+    print("Post-process completed successfully.\n", .{});
+
+    if (ctx.time_report) {
+        print("Post-process step: {}s, ({}ms).\n", .{
+            @divTrunc(duration, std.time.ns_per_s),
+            @divTrunc(duration, std.time.ns_per_ms),
+        });
+    }
+}
+
+fn renderStep(scene: *const Scene, renderer: Renderer, out: []LinearColor) !void {
+    return renderer.render(scene, out);
+}
+
+fn postProcessStep(linear_color_buf: []LinearColor, out: []u8) void {
+    for (linear_color_buf, 0..linear_color_buf.len) |lin, i| {
+        const srgb = lin.toSrgb8bit(.{ .extended_reinhard = .{ .white = 1.0 } });
+
+        const pixel_byte_index = i * 3;
+        std.mem.writeInt(u24, out[pixel_byte_index..][0..3], srgb.toPacked(), .big);
+    }
+}
+
+fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {
     const camera = scene.camera;
     const samples_per_pixel = settings.samples_per_pixel;
     const pixel_samples_scale = settings.pixel_samples_scale;
@@ -137,13 +206,7 @@ fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random,
         pixel_color_sum = pixel_color_sum.add(rayColor(ray, scene, ray_t_range, max_depth, random));
     }
 
-    const pixel_color = blk: {
-        const linear = pixel_color_sum.scalarMul(pixel_samples_scale);
-        const srgb = linear.toSrgb8bit(.{ .clamp = .{} });
-        break :blk srgb;
-    };
-
-    std.mem.writeInt(u24, out, pixel_color.toPacked(), .big);
+    out_color.* = pixel_color_sum.scalarMul(pixel_samples_scale);
 }
 
 fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {

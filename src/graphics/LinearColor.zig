@@ -108,8 +108,20 @@ pub const black = LinearColor { .v = @splat(0.0) };
 /// Initialize a pure white LinearColor (1, 1, 1)
 pub const white = LinearColor { .v = @splat(1.0) };
 
-pub fn init(r: Float, g: Float, b: Float) LinearColor {
-    return .{ .v = .{ r, g, b } };
+pub fn init(red: Float, green: Float, blue: Float) LinearColor {
+    return .{ .v = .{ red, green, blue } };
+}
+
+pub fn r(self: LinearColor) Float {
+    return self.v.x;
+}
+
+pub fn g(self: LinearColor) Float {
+    return self.v.y;
+}
+
+pub fn b(self: LinearColor) Float {
+    return self.v.z;
 }
 
 /// Performs the *gamma 2* correction.\
@@ -256,10 +268,10 @@ pub fn randomInRange(rand: std.Random, range: Interval) LinearColor {
 
 // TESTING
 
-fn expectLinearColorApproxEq(a: LinearColor, b: LinearColor, tolerance: Float) !void {
-    try std.testing.expectApproxEqAbs(a.v[0], b.v[0], tolerance);
-    try std.testing.expectApproxEqAbs(a.v[1], b.v[1], tolerance);
-    try std.testing.expectApproxEqAbs(a.v[2], b.v[2], tolerance);
+fn expectLinearColorApproxEq(lhs: LinearColor, rhs: LinearColor, tolerance: Float) !void {
+    try std.testing.expectApproxEqAbs(lhs.v[0], rhs.v[0], tolerance);
+    try std.testing.expectApproxEqAbs(lhs.v[1], rhs.v[1], tolerance);
+    try std.testing.expectApproxEqAbs(lhs.v[2], rhs.v[2], tolerance);
 }
 
 const eps = std.math.floatEps(Float);

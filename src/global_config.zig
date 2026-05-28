@@ -12,5 +12,3 @@ pub const AppConfig = struct {
     track_progress: bool = false,
     time_report: bool = false
 };
-
-pub const default_app_config = AppConfig {};

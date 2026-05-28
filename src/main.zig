@@ -5,7 +5,6 @@ const fs_utils = @import("fs_utils.zig");
 const type_utils = @import("type_utils.zig");
 const config = @import("global_config.zig");
 const rendering = graphics.scene_3d.rendering;
-const raytracing = rendering.raytracing;
 const materials = graphics.scene_3d.materials;
 const math_utils = @import("math_utils.zig");
 
@@ -17,10 +16,10 @@ const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Hittable = graphics.scene_3d.geometry.Hittable;
 const RenderSettings = rendering.RenderSettings;
-const RendererType = raytracing.RendererType;
-const Renderer = raytracing.Renderer;
-const SerialPathTracer = raytracing.SerialPathTracer;
-const ParallelPathTracer = raytracing.ParallelPathTracer;
+const RendererType = rendering.RendererType;
+const Renderer = rendering.Renderer;
+const SerialPathTracer = rendering.SerialPathTracer;
+const ParallelPathTracer = rendering.ParallelPathTracer;
 const Material = materials.Material;
 const Float = config.Float;
 

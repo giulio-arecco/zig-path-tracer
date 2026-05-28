@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
-const RenderSettings = @import("graphics/scene_3d/rendering/RenderSettings.zig");
-const RendererType = @import("graphics/scene_3d/rendering/raytracing.zig").RendererType;
+const RenderSettings = @import("graphics/scene_3d/rendering.zig").RenderSettings;
+const RendererType = @import("graphics/scene_3d/rendering.zig").RendererType;
 
 pub const Float = f32;
 pub const SceneId = enum { ProceduralSpheres, CornellBox, Quads };

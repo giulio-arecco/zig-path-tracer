@@ -6,6 +6,7 @@ const type_utils = @import("type_utils.zig");
 const config = @import("global_config.zig");
 const rendering = graphics.scene_3d.rendering;
 const materials = graphics.scene_3d.materials;
+const post_processing = graphics.post_processing;
 const math_utils = @import("math_utils.zig");
 
 const Vec3 = @import("Vec3.zig");
@@ -15,6 +16,9 @@ const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Hittable = graphics.scene_3d.geometry.Hittable;
+const DisplayTransform = post_processing.DisplayTransform;
+const PostProcessorHdr = post_processing.PostProcessorHdr;
+const FrameBuffers = rendering.FrameBuffers;
 const PipelineContext = rendering.PipelineContext;
 const RenderSettings = rendering.RenderSettings;
 const RendererType = rendering.RendererType;
@@ -141,14 +145,13 @@ pub fn main(init: std.process.Init) !void {
     try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
 
     // Choose rendering algorithm
-    var opt_threaded: ?std.Io.Threaded = null;
+    var opt_threaded: ?std.Io.Threaded = if (!builtin.single_threaded) std.Io.Threaded.init(allocator, .{}) else null;
     defer if (opt_threaded) |*t| t.deinit();
 
     const renderer: Renderer = switch (app_config.renderer_type) {
         .Parallel => blk: {
-            if (comptime builtin.single_threaded) unreachable;
+            comptime if (builtin.single_threaded) unreachable;
 
-            opt_threaded = std.Io.Threaded.init(allocator, .{});
             break :blk .{ .Parallel = .{
                 .io = opt_threaded.?.io(),
                 .settings = render_settings,
@@ -164,15 +167,27 @@ pub fn main(init: std.process.Init) !void {
     // Create the context for the rendering pipeline
     const image_size = @as(usize, render_settings.image_width) * @as(usize, render_settings.image_height);
     const linear_color_buf = try allocator.alloc(LinearColor, image_size);
+    const image_sized_buf_1 = try allocator.alloc(LinearColor, image_size);
+    const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
     defer allocator.free(linear_color_buf);
+    defer allocator.free(image_sized_buf_1);
+    defer allocator.free(image_sized_buf_2);
 
     var ctx = PipelineContext {
-        .io = init.io,
+        .io = if (opt_threaded) |*t| t.io() else init.io,
         .renderer = renderer,
+        .post_processing_final_step = .{
+            .tone_mapper = .{ .extended_reinhard = .{ .white = 1.0 } },
+            .transform_type = .toSrgb8bit
+        },
+        .frame_buffers = .{
+            .color_buf = linear_color_buf,
+            .pp_temp_in = image_sized_buf_1,
+            .pp_temp_out = image_sized_buf_2,
+            .out_buf = memory_map.memory[ppm_header_len..],
+        },
         .scene = undefined,
         .time_report = app_config.time_report,
-        .linear_color_buf = linear_color_buf,
-        .out_buf = memory_map.memory[ppm_header_len..],
     };
 
     // Init the scene and execute the rendering pipeline

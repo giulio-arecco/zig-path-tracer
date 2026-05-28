@@ -2,11 +2,14 @@ const std = @import("std");
 const config = @import("../../global_config.zig");
 const geometry = @import("geometry.zig");
 const math_utils = @import("../../math_utils.zig");
+const post_processing = @import("../post_processing.zig");
 
 const Scene = @import("Scene.zig");
 const Ray = @import("Ray.zig");
 const LinearColor = @import("../LinearColor.zig");
 const Vec3 = @import("../../Vec3.zig");
+const PostProcessorHdr = post_processing.PostProcessorHdr;
+const DisplayTransform = post_processing.DisplayTransform;
 const AppConfig = config.AppConfig;
 const Interval = math_utils.Interval(Float);
 const Float = config.Float;
@@ -16,13 +19,21 @@ const print = std.debug.print;
 
 pub const RendererType = enum { Serial, Parallel };
 
+pub const FrameBuffers = struct {
+    color_buf: []LinearColor,
+    pp_temp_in: []LinearColor,
+    pp_temp_out: []LinearColor,
+    out_buf: []u8
+};
+
 pub const PipelineContext = struct {
     io: std.Io,
     renderer: Renderer,
+    post_processing_hdr_chain: []const PostProcessorHdr = &.{},
+    post_processing_final_step: DisplayTransform,
+    frame_buffers: FrameBuffers,
     scene: *const Scene,
     time_report: bool = false,
-    linear_color_buf: []LinearColor,
-    out_buf: []u8,
 };
 
 pub const RenderSettings = struct {
@@ -141,7 +152,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Render started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    try renderStep(ctx.scene, ctx.renderer, ctx.linear_color_buf);
+    try renderStep(ctx.scene, ctx.renderer, ctx.frame_buffers.color_buf);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -160,7 +171,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    postProcessStep(ctx.linear_color_buf, ctx.out_buf);
+    postProcessStep(ctx.post_processing_hdr_chain, ctx.post_processing_final_step, &ctx.frame_buffers);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -177,17 +188,26 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     }
 }
 
-fn renderStep(scene: *const Scene, renderer: Renderer, out: []LinearColor) !void {
-    return renderer.render(scene, out);
+fn renderStep(scene: *const Scene, renderer: Renderer, out_buf: []LinearColor) !void {
+    return renderer.render(scene, out_buf);
 }
 
-fn postProcessStep(linear_color_buf: []LinearColor, out: []u8) void {
-    for (linear_color_buf, 0..linear_color_buf.len) |lin, i| {
-        const srgb = lin.toSrgb8bit(.{ .extended_reinhard = .{ .white = 1.0 } });
+fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_processing_last_step: DisplayTransform, frame_buffers: *const FrameBuffers) void {
+    var curr_in: []const LinearColor = frame_buffers.color_buf;
+    var curr_out = frame_buffers.pp_temp_in;
+    var unused_buf = frame_buffers.pp_temp_out;
 
-        const pixel_byte_index = i * 3;
-        std.mem.writeInt(u24, out[pixel_byte_index..][0..3], srgb.toPacked(), .big);
+    for (post_processing_hdr_chain) |p| {
+        p.process(.{
+            .in_color = curr_in,
+            .out_color = curr_out
+        });
+
+        curr_in = curr_out;
+        std.mem.swap([]LinearColor, &curr_out, &unused_buf);
     }
+
+    post_processing_last_step.process(curr_in, frame_buffers.out_buf);
 }
 
 fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {

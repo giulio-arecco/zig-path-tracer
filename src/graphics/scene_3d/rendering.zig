@@ -36,16 +36,40 @@ pub const PipelineContext = struct {
     time_report: bool = false,
 };
 
-pub const RenderSettings = struct {
+pub const UserRenderSettings = struct {
     image_width: u16 = 600,
     image_height: u16 = 600,
     ray_t_range: Interval = .{ .min = 0.001, .max = std.math.inf(Float) }, // Avoid min == 0.0 to prevent shadow acne
     max_ray_bounces: u16 = 50,
     samples_per_pixel: u16 = 200,
+};
+
+pub const InternalRenderSettings = struct {
+    image_width: u16,
+    image_height: u16,
+    ray_t_range: Interval,
+    max_ray_bounces: u16,
+    samples_per_pixel: u16,
+    sqrt_spp: u16,
+    recip_sqrt_spp: Float,
     /// Color scale factor for a sum of pixel samples. A value of `1.0 / samples_per_pixel` leads to the pixel color being the average of the sampled colors.
     pixel_samples_scale: Float = 1.0 / @as(Float, @floatFromInt(200)),
 
-    pub fn getAspectRatio(self: RenderSettings) f32 {
+    pub fn compile(settings: UserRenderSettings) InternalRenderSettings {
+        const sqrt_spp: u16 = std.math.sqrt(settings.samples_per_pixel);
+        return .{
+            .image_width = settings.image_width,
+            .image_height = settings.image_height,
+            .ray_t_range = settings.ray_t_range,
+            .max_ray_bounces = settings.max_ray_bounces,
+            .samples_per_pixel = settings.samples_per_pixel,
+            .sqrt_spp = sqrt_spp,
+            .recip_sqrt_spp = 1.0 / @as(Float, @floatFromInt(sqrt_spp)),
+            .pixel_samples_scale = 1.0 / @as(Float, @floatFromInt(settings.samples_per_pixel))
+        };
+    }
+
+    pub fn getAspectRatio(self: InternalRenderSettings) f32 {
         const f_width: f32 = @floatFromInt(self.image_width);
         const f_height: f32 = @floatFromInt(self.image_height);
 
@@ -65,7 +89,7 @@ pub const Renderer = union(RendererType) {
 };
 
 pub const SerialPathTracer = struct {
-    settings: RenderSettings = .{},
+    settings: InternalRenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
     pub fn render(self: SerialPathTracer, scene: *const Scene, out_color: []LinearColor) void {
@@ -92,7 +116,7 @@ pub const SerialPathTracer = struct {
 
 pub const ParallelPathTracer = struct {
     io: std.Io,
-    settings: RenderSettings = .{},
+    settings: InternalRenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
     pub fn render(self: ParallelPathTracer, scene: *const Scene, out_color: []LinearColor) !void {
@@ -210,7 +234,7 @@ fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_pro
     post_processing_last_step.process(curr_in, frame_buffers.out_buf);
 }
 
-fn colorPixel(settings: RenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {
+fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {
     const camera = scene.camera;
     const samples_per_pixel = settings.samples_per_pixel;
     const pixel_samples_scale = settings.pixel_samples_scale;
@@ -260,13 +284,13 @@ fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, ra
     return color_from_scatter.add(color_from_emission);
 }
 
-test "RenderSettings.getAspectRatio" {
-    const rs1 = RenderSettings{ .image_width = 1920, .image_height = 1080, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
+test "InternalRenderSettings.getAspectRatio" {
+    const rs1 = InternalRenderSettings.compile(.{ .image_width = 1920, .image_height = 1080, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
     try std.testing.expectApproxEqAbs(1.7777777, rs1.getAspectRatio(), 0.000001);
 
-    const rs2 = RenderSettings{ .image_width = 800, .image_height = 600, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
+    const rs2 = InternalRenderSettings.compile(.{ .image_width = 800, .image_height = 600, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
     try std.testing.expectApproxEqAbs(1.3333333, rs2.getAspectRatio(), 0.000001);
 
-    const rs3 = RenderSettings{ .image_width = 1000, .image_height = 1000, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
+    const rs3 = InternalRenderSettings.compile(.{ .image_width = 1000, .image_height = 1000, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
     try std.testing.expectApproxEqAbs(1.0, rs3.getAspectRatio(), 0.000001);
 }

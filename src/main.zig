@@ -20,7 +20,8 @@ const DisplayTransform = post_processing.DisplayTransform;
 const PostProcessorHdr = post_processing.PostProcessorHdr;
 const FrameBuffers = rendering.FrameBuffers;
 const PipelineContext = rendering.PipelineContext;
-const RenderSettings = rendering.RenderSettings;
+const UserRenderSettings = rendering.UserRenderSettings;
+const InternalRenderSettings = rendering.InternalRenderSettings;
 const RendererType = rendering.RendererType;
 const Renderer = rendering.Renderer;
 const SerialPathTracer = rendering.SerialPathTracer;
@@ -61,25 +62,25 @@ const help_entries = [_]ArgHelp {
     .{
         .name = "--img_height",
         .desc = "Choose the output image height.",
-        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.image_height}),
+        .default = std.fmt.comptimePrint("{}", .{default_config.user_render_settings.image_height}),
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
     },
     .{
         .name = "--img_width",
         .desc = "Choose the output image width.",
-        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.image_width}),
+        .default = std.fmt.comptimePrint("{}", .{default_config.user_render_settings.image_width}),
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
     },
     .{
         .name = "--max-bounces",
         .desc = "Choose the maximum number of traced ray bounces before stopping the recursion.",
-        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.max_ray_bounces}),
+        .default = std.fmt.comptimePrint("{}", .{default_config.user_render_settings.max_ray_bounces}),
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
     },
     .{
         .name = "--samples",
         .desc = "Choose how many times each pixel is sampled (i.e. how many rays are sent through each pixel).",
-        .default = std.fmt.comptimePrint("{}", .{default_config.render_settings.samples_per_pixel}),
+        .default = std.fmt.comptimePrint("{}", .{default_config.user_render_settings.samples_per_pixel}),
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
     },
     .{
@@ -114,7 +115,7 @@ pub fn main(init: std.process.Init) !void {
     var args_it = try init.minimal.args.iterateAllocator(allocator);
 
     const app_config = try parseArgs(&args_it, locked_stderr.terminal()) orelse return;
-    const render_settings = app_config.render_settings;
+    const render_settings = InternalRenderSettings.compile(app_config.user_render_settings);
     init.io.unlockStderr();
     args_it.deinit();
 
@@ -258,7 +259,7 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
                 w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
                 return error.MissingArgument;
             };
-            app_config.render_settings.image_height = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+            app_config.user_render_settings.image_height = std.fmt.parseInt(u16, val_str, 10) catch |err| {
                 switch (err) {
                     error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
                     error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
@@ -271,7 +272,7 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
                 w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
                 return error.MissingArgument;
             };
-            app_config.render_settings.image_width = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+            app_config.user_render_settings.image_width = std.fmt.parseInt(u16, val_str, 10) catch |err| {
                 switch (err) {
                     error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
                     error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
@@ -284,7 +285,7 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
                 w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
                 return error.MissingArgument;
             };
-            app_config.render_settings.max_ray_bounces = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+            app_config.user_render_settings.max_ray_bounces = std.fmt.parseInt(u16, val_str, 10) catch |err| {
                 switch (err) {
                     error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
                     error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
@@ -297,14 +298,13 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
                 w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
                 return error.MissingArgumentValue;
             };
-            app_config.render_settings.samples_per_pixel = std.fmt.parseInt(u16, val_str, 10) catch |err| {
+            app_config.user_render_settings.samples_per_pixel = std.fmt.parseInt(u16, val_str, 10) catch |err| {
                 switch (err) {
                     error.Overflow => w.print("Error: the value for argument '{s}' must be an integer between 0 and {}.\n", .{arg_name, u16Max}) catch {},
                     error.InvalidCharacter => w.print("Error: the argument '{s}' requires a positive integer value, found '{s}' instead.\n", .{arg_name, val_str}) catch {},
                 }
                 return err;
             };
-            app_config.render_settings.pixel_samples_scale = 1.0 / @as(Float, @floatFromInt(app_config.render_settings.samples_per_pixel));
         }
         else if (std.mem.eql(u8, arg_name, "--track-progress")) {
             if (arg_val != null) {
@@ -338,7 +338,7 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
     return app_config;
 }
 
-fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, render_settings: RenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
     switch (scene_id) {
         .ProceduralSpheres => try initAndRenderSpheresScene(gpa, render_settings, ctx),
         .CornellBox => try initAndRenderCornellBox(gpa, render_settings, ctx),
@@ -372,7 +372,6 @@ fn printHelp(term: std.Io.Terminal) void {
             w.print("    {s}\n", .{line}) catch {};
         }
 
-
         // Default
         if (entry.default) |default| {
             w.writeAll("    Defaults to: ") catch {};
@@ -398,7 +397,7 @@ fn printHelp(term: std.Io.Terminal) void {
     }
 }
 
-fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: RenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(13.0, 2.0, 3.0),
         .init(0.0, 0.0, 0.0),
@@ -493,7 +492,7 @@ fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: RenderSett
     try executeRenderPipeline(ctx.*);
 }
 
-fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: RenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(0.0, 0.0, 9.0),
         .init(0.0, 0.0, 0.0),
@@ -549,7 +548,7 @@ fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: RenderSettin
     try executeRenderPipeline(ctx.*);
 }
 
-fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: RenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(278.0, 278.0, -800.0),
         .init(278.0, 278.0, 0.0),
@@ -675,11 +674,10 @@ test "parseArgs - equal syntax" {
     const cfg = cfg_opt.?;
     try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
     try testing.expectEqual(SceneId.CornellBox, cfg.scene_id);
-    try testing.expectEqual(@as(u16, 720), cfg.render_settings.image_height);
-    try testing.expectEqual(@as(u16, 1280), cfg.render_settings.image_width);
-    try testing.expectEqual(@as(u16, 50), cfg.render_settings.max_ray_bounces);
-    try testing.expectEqual(@as(u16, 100), cfg.render_settings.samples_per_pixel);
-    try testing.expectApproxEqAbs(@as(Float, 0.01), cfg.render_settings.pixel_samples_scale, std.math.floatEps(Float));
+    try testing.expectEqual(@as(u16, 720), cfg.user_render_settings.image_height);
+    try testing.expectEqual(@as(u16, 1280), cfg.user_render_settings.image_width);
+    try testing.expectEqual(@as(u16, 50), cfg.user_render_settings.max_ray_bounces);
+    try testing.expectEqual(@as(u16, 100), cfg.user_render_settings.samples_per_pixel);
 }
 
 test "parseArgs - space syntax" {
@@ -704,8 +702,8 @@ test "parseArgs - space syntax" {
     const cfg = cfg_opt.?;
     try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
     try testing.expectEqual(SceneId.ProceduralSpheres, cfg.scene_id);
-    try testing.expectEqual(@as(u16, 720), cfg.render_settings.image_height);
-    try testing.expectEqual(@as(u16, 1280), cfg.render_settings.image_width);
+    try testing.expectEqual(@as(u16, 720), cfg.user_render_settings.image_height);
+    try testing.expectEqual(@as(u16, 1280), cfg.user_render_settings.image_width);
 }
 
 test "parseArgs - help" {
@@ -784,7 +782,7 @@ test "parseArgs - integer boundary constraints" {
     var it_max = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-height=65535"} };
     const cfg_opt = try parseArgs(&it_max, dummy_term);
     try testing.expect(cfg_opt != null);
-    try testing.expectEqual(@as(u16, 65535), cfg_opt.?.render_settings.image_height);
+    try testing.expectEqual(@as(u16, 65535), cfg_opt.?.user_render_settings.image_height);
 
     // Negative numbers
     var it_neg = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--img-width=-1"} };
@@ -794,7 +792,7 @@ test "parseArgs - integer boundary constraints" {
     var it_zero = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--max-bounces=0"} };
     const cfg_zero_opt = try parseArgs(&it_zero, dummy_term);
     try testing.expect(cfg_zero_opt != null);
-    try testing.expectEqual(@as(u16, 0), cfg_zero_opt.?.render_settings.max_ray_bounces);
+    try testing.expectEqual(@as(u16, 0), cfg_zero_opt.?.user_render_settings.max_ray_bounces);
 }
 
 test "parseArgs - invalid enum values" {

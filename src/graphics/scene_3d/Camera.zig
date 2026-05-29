@@ -12,10 +12,12 @@ const Camera = @This();
 
 const std = @import("std");
 const math_utils = @import("../../math_utils.zig");
+const rendering = @import("rendering.zig");
 
 const Vec3 = @import("../../Vec3.zig");
 const Float = @import("../../global_config.zig").Float;
-const RenderSettings = @import("rendering.zig").RenderSettings;
+const UserRenderSettings = rendering.UserRenderSettings;
+const InternalRenderSettings = rendering.InternalRenderSettings;
 const Ray = @import("Ray.zig");
 
 const normalized = Vec3.normalized;
@@ -53,7 +55,7 @@ _pixel_delta_v: Vec3,
 /// The location of the first pixel in the viewport. Treat as **immutable**.
 _pixel_top_left: Vec3,
 
-pub fn init(pos: Vec3, up: Vec3, right: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: RenderSettings) Camera {
+pub fn init(pos: Vec3, up: Vec3, right: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: InternalRenderSettings) Camera {
     // Determine the camera orientation
     const unit_up = if (up.isNormalized()) up else normalized(up);
     const unit_right = if (right.isNormalized()) right else normalized(right);
@@ -63,7 +65,7 @@ pub fn init(pos: Vec3, up: Vec3, right: Vec3, focus_distance: Float, defocus_ang
     return viewportSetup(pos, unit_up, unit_right, unit_forward, focus_distance, defocus_angle, vertical_fov, render_settings);
 }
 
-pub fn initLookAt (from: Vec3, to: Vec3, vertical_fov: Float, focus_distance: Float, defocus_angle: Float, render_settings: RenderSettings) Camera {
+pub fn initLookAt(from: Vec3, to: Vec3, vertical_fov: Float, focus_distance: Float, defocus_angle: Float, render_settings: InternalRenderSettings) Camera {
     // Determine the camera orientation
     const unit_forward = normalized(sub(from, to));
 
@@ -105,7 +107,7 @@ fn sample_unit_square(prng: std.Random) Vec3 {
     return .init(prng.float(Float) - 0.5, prng.float(Float) - 0.5, 0.0);
 }
 
-fn viewportSetup(pos: Vec3, unit_up: Vec3, unit_right: Vec3, unit_forward: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: RenderSettings) Camera {
+fn viewportSetup(pos: Vec3, unit_up: Vec3, unit_right: Vec3, unit_forward: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: InternalRenderSettings) Camera {
     const theta: Float = std.math.degreesToRadians(vertical_fov);
     const viewport_height = 2.0 * focus_distance * @tan(theta / 2.0);
     const viewport_width = viewport_height * render_settings.getAspectRatio();
@@ -149,7 +151,7 @@ const abs_eps = 2 * std.math.floatEps(Float);
 const rel_eps = @sqrt(std.math.floatEps(Float));
 
 test "init" {
-    const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
+    const rs = InternalRenderSettings.compile(.{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
     const pos = Vec3.init(0.0, 0.0, 0.0);
     var up = Vec3.init(0.0, 1.0, 0.0);
     var right = Vec3.init(1.0, 0.0, 0.0);
@@ -185,7 +187,7 @@ test "init" {
 }
 
 test "initLookAt" {
-    const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
+    const rs = InternalRenderSettings.compile(.{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
     const pos = Vec3.init(0.0, 0.0, 0.0);
     var to = Vec3.init(0.0, 0.0, -50.0);
     var camera = initLookAt(pos, to, 90.0, Vec3.distance(pos, to), 0.0, rs);
@@ -239,7 +241,7 @@ test "initLookAt" {
 }
 
 test "viewportSetup" {
-    const rs = RenderSettings{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .pixel_samples_scale = 1.0, .max_ray_bounces = 10 };
+    const rs = InternalRenderSettings.compile(.{ .image_width = 800, .image_height = 400, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
     const pos = Vec3.init(0.0, 0.0, 0.0);
     const to = Vec3.init(0.0, 0.0, -10.0);
     const fov: Float = 90.0;

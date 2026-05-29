@@ -54,6 +54,8 @@ _pixel_delta_u: Vec3,
 _pixel_delta_v: Vec3,
 /// The location of the first pixel in the viewport. Treat as **immutable**.
 _pixel_top_left: Vec3,
+/// The length of a subpixel grid cell, used for stratification. Treat as **immutable**.
+_pixel_cell_side_len: Float,
 
 pub fn init(pos: Vec3, up: Vec3, right: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: InternalRenderSettings) Camera {
     // Determine the camera orientation
@@ -83,9 +85,9 @@ pub fn initLookAt(from: Vec3, to: Vec3, vertical_fov: Float, focus_distance: Flo
     return viewportSetup(from, unit_up, unit_right, unit_forward, focus_distance, defocus_angle, vertical_fov, render_settings);
 }
 
-/// Construct a camera ray originating from the defocus disk and directed at a randomly sampled point around the pixel location x_screen, y_screen
-pub fn getRay(self: Camera, rand: std.Random, x_screen: usize, y_screen: usize, sample_center: bool) Ray {
-    const offset: Vec3 = if (sample_center) .init(0.0, 0.0, 0.0) else sample_unit_square(rand);
+/// Construct a camera ray originating from the defocus disk and directed at a randomly sampled point around the pixel location x_screen, y_screen for stratified sample square sample_i, sample_j.
+pub fn getRay(self: Camera, rand: std.Random, x_screen: usize, y_screen: usize, sample_i: usize, sample_j: usize) Ray {
+    const offset: Vec3 = sample_square_stratified(rand, self._pixel_cell_side_len, sample_i, sample_j);
 
     const pixel_sample = self._pixel_top_left.
                 add(self._pixel_delta_u.scalarMul(@as(Float, @floatFromInt(x_screen)) + offset.x)).
@@ -103,8 +105,16 @@ fn defocus_disk_sample(self: Camera, rand: std.Random) Vec3 {
     return self._pos.add(self._defocus_disk_u.scalarMul(p.x)).add(self._defocus_disk_v.scalarMul(p.y));
 }
 
-fn sample_unit_square(prng: std.Random) Vec3 {
-    return .init(prng.float(Float) - 0.5, prng.float(Float) - 0.5, 0.0);
+fn sample_unit_square(rand: std.Random) Vec3 {
+    return .init(rand.float(Float) - 0.5, rand.float(Float) - 0.5, 0.0);
+}
+
+/// Returns the vector to a random point in the square sub-pixel specified by grid indices sample_i and sample_j, for an idealized unit square pixel [-0.5,-0.5] to [+0.5,+0.5].
+fn sample_square_stratified(rand: std.Random, square_side_length: Float, sample_i: usize, sample_j: usize) Vec3 {
+    const px = ((@as(Float, @floatFromInt(sample_i)) + rand.float(Float)) * square_side_length) - 0.5;
+    const py = ((@as(Float, @floatFromInt(sample_j)) + rand.float(Float)) * square_side_length) - 0.5;
+
+    return .init(px, py, 0.0);
 }
 
 fn viewportSetup(pos: Vec3, unit_up: Vec3, unit_right: Vec3, unit_forward: Vec3, focus_distance: Float, defocus_angle: Float, vertical_fov: Float, render_settings: InternalRenderSettings) Camera {
@@ -142,7 +152,8 @@ fn viewportSetup(pos: Vec3, unit_up: Vec3, unit_right: Vec3, unit_forward: Vec3,
         ._viewport_center = viewport_center,
         ._pixel_delta_u = pixel_delta_u,
         ._pixel_delta_v = pixel_delta_v,
-        ._pixel_top_left = pixel_top_left
+        ._pixel_top_left = pixel_top_left,
+        ._pixel_cell_side_len = render_settings.recip_sqrt_spp
     };
 }
 

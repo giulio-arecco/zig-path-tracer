@@ -236,18 +236,17 @@ fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_pro
 
 fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {
     const camera = scene.camera;
-    const samples_per_pixel = settings.samples_per_pixel;
     const pixel_samples_scale = settings.pixel_samples_scale;
     const ray_t_range = settings.ray_t_range;
     const max_depth = settings.max_ray_bounces;
 
     var pixel_color_sum = LinearColor.black;
 
-    for (0..samples_per_pixel) |sample| {
-        const ray = if (sample == 0) camera.getRay(random, x_screen, y_screen, true)
-            else camera.getRay(random, x_screen, y_screen, false);
-
-        pixel_color_sum = pixel_color_sum.add(rayColor(ray, scene, ray_t_range, max_depth, random));
+    for(0..settings.sqrt_spp) |sample_j| {
+        for (0..settings.sqrt_spp) |sample_i| {
+            const ray = camera.getRay(random, x_screen, y_screen, sample_i, sample_j);
+            pixel_color_sum = pixel_color_sum.add(rayColor(ray, scene, ray_t_range, max_depth, random));
+        }
     }
 
     out_color.* = pixel_color_sum.scalarMul(pixel_samples_scale);

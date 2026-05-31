@@ -17,7 +17,7 @@ const Scene = graphics.scene_3d.Scene;
 const Camera = graphics.scene_3d.Camera;
 const Hittable = graphics.scene_3d.geometry.Hittable;
 const DisplayTransform = post_processing.DisplayTransform;
-const PostProcessorHdr = post_processing.PostProcessorHdr;
+const Denoiser = post_processing.Denoiser;
 const FrameBuffers = rendering.FrameBuffers;
 const PipelineContext = rendering.PipelineContext;
 const UserRenderSettings = rendering.UserRenderSettings;
@@ -168,13 +168,13 @@ pub fn main(init: std.process.Init) !void {
 
     // Create the context for the rendering pipeline
     const image_size = @as(usize, render_settings.image_width) * @as(usize, render_settings.image_height);
-    const linear_color_buf = try allocator.alloc(LinearColor, image_size);
+    const irrad_buf = try allocator.alloc(LinearColor, image_size);
     const albedo_buf = try allocator.alloc(LinearColor, image_size);
     const normal_buf = try allocator.alloc(Vec3, image_size);
     const depth_buf = try allocator.alloc(Float, image_size);
     const image_sized_buf_1 = try allocator.alloc(LinearColor, image_size);
     const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
-    defer allocator.free(linear_color_buf);
+    defer allocator.free(irrad_buf);
     defer allocator.free(albedo_buf);
     defer allocator.free(normal_buf);
     defer allocator.free(depth_buf);
@@ -184,17 +184,14 @@ pub fn main(init: std.process.Init) !void {
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,
         .renderer = renderer,
-        .post_processing_hdr_chain = &.{ .{ .atrous_denoiser = .{
-            .iterations = 4,
-            .sigma_normal = 0.012,
-            .sigma_depth = 7e-4,
-        }}},
-        .post_processing_final_step = .{
-            .tone_mapper = .{ .extended_reinhard = .{ .white = 4.0 } },
-            .transform_type = .toSrgb8bit
+        .post_processing_pipeline = .{
+            .display_transform = .{
+                .tone_mapper = .{ .extended_reinhard = .{ .white = 4.0 } },
+                .transform_type = .toSrgb8bit
+            },
         },
         .frame_buffers = .{
-            .color_buf = linear_color_buf,
+            .irrad_buf = irrad_buf,
             .albedo_buf = albedo_buf,
             .normal_buf = normal_buf,
             .depth_buf = depth_buf,

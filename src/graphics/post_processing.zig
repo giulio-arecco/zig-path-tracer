@@ -84,10 +84,10 @@ pub const GammaCompressionToneMapper = struct {
     }
 };
 
-pub const StepContext = struct {
-    in_color: []const LinearColor,
+pub const DenoiserContext = struct {
+    in_irrad: []const LinearColor,
     temp_buf: []LinearColor,
-    out_color: []LinearColor,
+    out_irrad: []LinearColor,
     albedo: []const LinearColor,
     normal: []const Vec3,
     depth: []const Float,
@@ -95,13 +95,13 @@ pub const StepContext = struct {
     image_height: u16,
 };
 
-pub const PostProcessorHdr = union(enum) {
+pub const Denoiser = union(enum) {
     joint_bilateral_denoiser: JointBilateralDenoiser,
     atrous_denoiser: ATrousDenoiser,
 
-    pub fn process(self: PostProcessorHdr, ctx: StepContext) void {
+    pub fn apply(self: Denoiser, ctx: DenoiserContext) void {
         switch (self) {
-            inline else => |p| p.process(ctx)
+            inline else => |p| p.apply(ctx)
         }
     }
 };
@@ -113,20 +113,13 @@ pub const JointBilateralDenoiser = struct {
     sigma_depth: Float,
     // sigma_luma: Float,
 
-    pub fn process(self: JointBilateralDenoiser, ctx: StepContext) void {
-        std.debug.assert(ctx.image_height > 0);
-        std.debug.assert(ctx.image_width > 0);
+    pub fn apply(self: JointBilateralDenoiser, ctx: DenoiserContext) void {
         std.debug.assert(self.kernel_size > 0);
         std.debug.assert(self.kernel_size % 2 != 0);
         std.debug.assert(self.sigma_space > 0);
         std.debug.assert(self.sigma_normal > 0);
         std.debug.assert(self.sigma_depth > 0);
         // std.debug.assert(self.sigma_luma > 0);
-        const buf_len = ctx.in_color.len;
-        std.debug.assert(ctx.out_color.len == buf_len);
-        std.debug.assert(ctx.albedo.len == buf_len);
-        std.debug.assert(ctx.normal.len == buf_len);
-        std.debug.assert(ctx.depth.len == buf_len);
 
         const inv_two_sigma_space_sq = 1.0 / (2 * self.sigma_space * self.sigma_space);
         const inv_two_sigma_normal_sq = 1.0 / (2 * self.sigma_normal * self.sigma_normal);
@@ -142,12 +135,12 @@ pub const JointBilateralDenoiser = struct {
                 const center_depth = ctx.depth[center_index];
                 const center_is_bg = std.math.isInf(center_depth);
                 if (center_is_bg) {
-                    ctx.out_color[center_index] = ctx.in_color[center_index];
+                    ctx.out_irrad[center_index] = ctx.in_irrad[center_index];
                     continue;
                 }
 
-                const min_albedo: @Vector(3, Float) = @splat(1e-3);
-                const center_irrad = ctx.in_color[center_index].div(.{ .v = @max(ctx.albedo[center_index].v, min_albedo) });
+                // const min_albedo: @Vector(3, Float) = @splat(1e-3);
+                // const center_irrad = ctx.in_irrad[center_index].div(.{ .v = @max(ctx.albedo[center_index].v, min_albedo) });
                 // const center_luma = luminanceSrgb(center_irrad);
                 // const center_luma_norm = center_luma / (1.0 + center_luma);
                 const center_normal = ctx.normal[center_index];
@@ -174,7 +167,7 @@ pub const JointBilateralDenoiser = struct {
                         const neighbor_is_bg = std.math.isInf(neighbor_depth);
                         if (neighbor_is_bg) continue;
 
-                        const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = @max(ctx.albedo[neighbor_index].v, min_albedo) });
+                        // const neighbor_irrad = ctx.in_irrad[neighbor_index].div(.{ .v = @max(ctx.albedo[neighbor_index].v, min_albedo) });
                         // const neighbor_luma = luminanceSrgb(neighbor_irrad);
                         // const neighbor_luma_norm = neighbor_luma / (1.0 + neighbor_luma);
                         const neighbor_normal = ctx.normal[neighbor_index];
@@ -192,13 +185,13 @@ pub const JointBilateralDenoiser = struct {
                         // const total_w = w_space * w_normal * w_depth * w_luma;
                         const total_w = w_space * w_normal * w_depth;
 
-                        irrad_sum = irrad_sum.add(neighbor_irrad.scalarMul(total_w));
+                        irrad_sum = irrad_sum.add(ctx.in_irrad[neighbor_index].scalarMul(total_w));
                         weights_sum += total_w;
                     }
                 }
 
-                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) center_irrad else irrad_sum.scalarDiv(weights_sum);
-                ctx.out_color[center_index] = center_out_irrad.mul(ctx.albedo[center_index]);
+                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) ctx.in_irrad[center_index] else irrad_sum.scalarDiv(weights_sum);
+                ctx.out_irrad[center_index] = center_out_irrad;
             }
         }
     }
@@ -210,30 +203,39 @@ pub const ATrousDenoiser = struct {
     sigma_depth: Float,
 
     pub const ATrousPassContext = struct {
-        in_color: []const LinearColor,
-        out_color: []LinearColor,
+        in_irrad: []const LinearColor,
+        out_irrad: []LinearColor,
         albedo: []const LinearColor,
         normal: []const Vec3,
         depth: []const Float,
         image_width: u16,
         image_height: u16,
+        sigma_normal: Float,
+        sigma_depth: Float,
+        step: usize
     };
 
-    pub fn process(self: ATrousDenoiser, ctx: StepContext) void {
-        var curr_in = ctx.in_color;
-        var curr_out = ctx.out_color;
+    pub fn apply(self: ATrousDenoiser, ctx: DenoiserContext) void {
+        std.debug.assert(self.sigma_normal > 0);
+        std.debug.assert(self.sigma_depth > 0);
+
+        var curr_in = ctx.in_irrad;
+        var curr_out = ctx.out_irrad;
         var unused_buf = ctx.temp_buf;
         var step: usize = 1;
 
         for(0..self.iterations) |_| {
-            atrousPass(self.sigma_normal, self.sigma_depth, step, .{
-                .in_color = curr_in,
-                .out_color = curr_out,
+            atrousPass(.{
+                .in_irrad = curr_in,
+                .out_irrad = curr_out,
                 .albedo = ctx.albedo,
                 .normal = ctx.normal,
                 .depth = ctx.depth,
                 .image_height = ctx.image_height,
-                .image_width = ctx.image_width
+                .image_width = ctx.image_width,
+                .sigma_normal = self.sigma_normal,
+                .sigma_depth = self.sigma_depth,
+                .step = step,
             }, );
 
             curr_in = curr_out;
@@ -242,28 +244,18 @@ pub const ATrousDenoiser = struct {
             step <<= 1;
         }
 
-        std.debug.assert(curr_in.len == ctx.out_color.len);
-        if (curr_in.ptr != ctx.out_color.ptr) {
-            @memcpy(ctx.out_color, curr_in);
+        std.debug.assert(curr_in.len == ctx.out_irrad.len);
+        if (curr_in.ptr != ctx.out_irrad.ptr) {
+            @memcpy(ctx.out_irrad, curr_in);
         }
     }
 
-    fn atrousPass(sigma_normal: Float, sigma_depth: Float, step: usize, ctx: ATrousPassContext) void {
-        std.debug.assert(ctx.image_height > 0);
-        std.debug.assert(ctx.image_width > 0);
-        std.debug.assert(sigma_normal > 0);
-        std.debug.assert(sigma_depth > 0);
-        const buf_len = ctx.in_color.len;
-        std.debug.assert(ctx.out_color.len == buf_len);
-        std.debug.assert(ctx.albedo.len == buf_len);
-        std.debug.assert(ctx.normal.len == buf_len);
-        std.debug.assert(ctx.depth.len == buf_len);
-
-        const min_albedo: @Vector(3, Float) = @splat(1e-3);
-        const inv_two_sigma_normal_sq = 1.0 / (2 * sigma_normal * sigma_normal);
-        const inv_two_sigma_depth_sq = 1.0 / (2 * sigma_depth * sigma_depth);
+    fn atrousPass(ctx: ATrousPassContext) void {
+        // const min_albedo: @Vector(3, Float) = @splat(1e-3);
+        const inv_two_sigma_normal_sq = 1.0 / (2 * ctx.sigma_normal * ctx.sigma_normal);
+        const inv_two_sigma_depth_sq = 1.0 / (2 * ctx.sigma_depth * ctx.sigma_depth);
         const h = [5]Float { 1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0 }; // Wavelet weights
-        const int_step = @as(isize, @intCast(step));
+        const int_step = @as(isize, @intCast(ctx.step));
         const int_height = @as(isize, ctx.image_height);
         const int_width = @as(isize, ctx.image_width);
 
@@ -275,12 +267,12 @@ pub const ATrousDenoiser = struct {
                 const center_depth = ctx.depth[center_index];
                 const center_is_bg = std.math.isInf(center_depth);
                 if (center_is_bg) {
-                    ctx.out_color[center_index] = ctx.in_color[center_index];
+                    ctx.out_irrad[center_index] = ctx.in_irrad[center_index];
                     continue;
                 }
 
-                const center_albedo: @Vector(3, Float) = @max(ctx.albedo[center_index].v, min_albedo);
-                const center_irrad = ctx.in_color[center_index].div(.{ .v = center_albedo });
+                // const center_albedo: @Vector(3, Float) = @max(ctx.albedo[center_index].v, min_albedo);
+                // const center_irrad = ctx.in_color[center_index].div(.{ .v = center_albedo });
                 const center_normal = ctx.normal[center_index];
 
                 var irrad_sum = LinearColor.black;
@@ -299,8 +291,8 @@ pub const ATrousDenoiser = struct {
                         const neighbor_is_bg = std.math.isInf(neighbor_depth);
                         if (neighbor_is_bg) continue;
 
-                        const neighbor_albedo: @Vector(3, Float) = @max(ctx.albedo[neighbor_index].v, min_albedo);
-                        const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = neighbor_albedo });
+                        // const neighbor_albedo: @Vector(3, Float) = @max(ctx.albedo[neighbor_index].v, min_albedo);
+                        // const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = neighbor_albedo });
                         const neighbor_normal = ctx.normal[neighbor_index];
 
                         const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
@@ -312,25 +304,25 @@ pub const ATrousDenoiser = struct {
                         const w_kernel = h[kx] * h[ky];
                         const total_w = w_kernel * w_normal * w_depth;
 
-                        irrad_sum = irrad_sum.add(neighbor_irrad.scalarMul(total_w));
+                        irrad_sum = irrad_sum.add(ctx.in_irrad[neighbor_index].scalarMul(total_w));
                         weights_sum += total_w;
                     }
                 }
 
-                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) center_irrad else irrad_sum.scalarDiv(weights_sum);
-                ctx.out_color[center_index] = center_out_irrad.mul(ctx.albedo[center_index]);
+                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) ctx.in_irrad[center_index] else irrad_sum.scalarDiv(weights_sum);
+                ctx.out_irrad[center_index] = center_out_irrad;
             }
         }
     }
 };
 
-pub const DisplayTransformType = enum { toSrgb8bit };
-
 pub const DisplayTransform = struct {
     tone_mapper: ToneMapper,
     transform_type: DisplayTransformType,
 
-    pub fn process(self: DisplayTransform, hdr_buf: []const LinearColor, out_buf: []u8) void {
+    pub const DisplayTransformType = enum { toSrgb8bit };
+
+    pub fn apply(self: DisplayTransform, hdr_buf: []const LinearColor, out_buf: []u8) void {
         for(hdr_buf, 0..hdr_buf.len) |lin_col, i| {
             const out_col = switch (self.transform_type) {
                 .toSrgb8bit => self.toSrgb8bit(lin_col)
@@ -442,15 +434,21 @@ pub const DisplayTransform = struct {
     }
 };
 
-pub fn luminanceSrgb(c: LinearColor) Float {
-    return 0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b();
+pub fn colorRecomposition(albedo_buf: []const LinearColor, in_irrad: []const LinearColor, out_color: []LinearColor) void {
+    for(in_irrad, albedo_buf, out_color) |irrad, albedo, *color| {
+        color.* = irrad.mul(albedo);
+    }
 }
 
-pub fn getDemodulationColor(mat: *const Material) LinearColor {
+pub fn getRecompositionAlbedo(mat: *const Material) LinearColor {
     switch (mat.*) {
         inline .lambertian, .metal => |m| return m.albedo,
         inline .dielectic, .diffuse_light => return LinearColor.white,
     }
+}
+
+pub fn luminanceSrgb(c: LinearColor) Float {
+    return 0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b();
 }
 
 const eps = std.math.floatEps(Float);
@@ -563,7 +561,7 @@ test "DisplayTransform.process" {
     const mapper = ToneMapper{ .clamp = .{} };
     const dt = DisplayTransform{ .tone_mapper = mapper, .transform_type = .toSrgb8bit };
 
-    dt.process(&hdr_buf, &out_buf);
+    dt.apply(&hdr_buf, &out_buf);
 
     const exp_col0 = dt.toSrgb8bit(hdr_buf[0]);
     try std.testing.expectEqual(exp_col0.r, out_buf[0]);
@@ -580,6 +578,6 @@ test "DisplayTransform.process - empty buffer" {
     const hdr_buf = [_]LinearColor{};
     var out_buf: [0]u8 = undefined;
     const dt = DisplayTransform{ .tone_mapper = .{ .clamp = .{} }, .transform_type = .toSrgb8bit };
-    dt.process(&hdr_buf, &out_buf);
+    dt.apply(&hdr_buf, &out_buf);
 }
 

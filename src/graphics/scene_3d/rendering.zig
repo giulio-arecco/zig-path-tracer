@@ -8,7 +8,7 @@ const Scene = @import("Scene.zig");
 const Ray = @import("Ray.zig");
 const LinearColor = @import("../LinearColor.zig");
 const Vec3 = @import("../../Vec3.zig");
-const PostProcessorHdr = post_processing.PostProcessorHdr;
+const Denoiser = post_processing.Denoiser;
 const DisplayTransform = post_processing.DisplayTransform;
 const AppConfig = config.AppConfig;
 const Interval = math_utils.Interval(Float);
@@ -16,12 +16,13 @@ const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
 const print = std.debug.print;
-const getDemodulationColor = post_processing.getDemodulationColor;
+const colorRecomposition = post_processing.colorRecomposition;
+const getRecompositionAlbedo = post_processing.getRecompositionAlbedo;
 
 pub const RendererType = enum { Serial, Parallel };
 
 pub const FrameBuffers = struct {
-    color_buf: []LinearColor,
+    irrad_buf: []LinearColor,
     albedo_buf: []LinearColor,
     normal_buf: []Vec3,
     depth_buf: []Float,
@@ -31,7 +32,7 @@ pub const FrameBuffers = struct {
 };
 
 pub const FrameBuffersRenderView = struct {
-    color_buf: []LinearColor,
+    irrad_buf: []LinearColor,
     albedo_buf: []LinearColor,
     normal_buf: []Vec3,
     depth_buf: []Float,
@@ -40,13 +41,17 @@ pub const FrameBuffersRenderView = struct {
 pub const PipelineContext = struct {
     io: std.Io,
     renderer: Renderer,
-    post_processing_hdr_chain: []const PostProcessorHdr = &.{},
-    post_processing_final_step: DisplayTransform,
+    post_processing_pipeline: PostProcessingPipeline,
     frame_buffers: FrameBuffers,
     image_height: u16,
     image_width: u16,
     scene: *const Scene,
     time_report: bool = false,
+};
+
+pub const PostProcessingPipeline = struct {
+    denoiser: ?Denoiser = null,
+    display_transform: DisplayTransform,
 };
 
 pub const UserRenderSettings = struct {
@@ -123,7 +128,7 @@ pub const SerialPathTracer = struct {
                 const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
                 updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, buffers);
 
-                colorPixel(self.settings, scene, random, x_screen, y_screen, &buffers.color_buf[pixel_index]);
+                colorPixel(self.settings, scene, random, x_screen, y_screen, &buffers.irrad_buf[pixel_index]);
             }
 
             if (task_node) |n| n.completeOne();
@@ -150,7 +155,7 @@ pub const ParallelPathTracer = struct {
             const start = y_screen * image_width;
             const end = start + image_width;
             const row_buffers = FrameBuffersRenderView {
-                .color_buf = buffers.color_buf[start..end],
+                .irrad_buf = buffers.irrad_buf[start..end],
                 .albedo_buf = buffers.albedo_buf[start..end],
                 .normal_buf = buffers.normal_buf[start..end],
                 .depth_buf = buffers.depth_buf[start..end],
@@ -187,7 +192,7 @@ pub const ParallelPathTracer = struct {
             const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
             updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, row_buffers);
 
-            colorPixel(self.settings, scene, random, x_screen, y_screen, &row_buffers.color_buf[pixel_index]);
+            colorPixel(self.settings, scene, random, x_screen, y_screen, &row_buffers.irrad_buf[pixel_index]);
         }
 
         if (progress_node) |n| n.completeOne();
@@ -205,7 +210,7 @@ fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, inde
         return;
     }
 
-    buffers.albedo_buf[index] = getDemodulationColor(hit_record.material);
+    buffers.albedo_buf[index] = getRecompositionAlbedo(hit_record.material);
     buffers.normal_buf[index] = hit_record.normal;
 
     const depth = -Vec3.dot(scene.camera._forward, hit_record.point.sub(ray.origin));
@@ -216,6 +221,16 @@ fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, inde
 }
 
 pub fn executeRenderPipeline(ctx: PipelineContext) !void {
+    const buf_len = ctx.frame_buffers.irrad_buf.len;
+    std.debug.assert(ctx.frame_buffers.albedo_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.normal_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.depth_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.pp_temp_1.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.pp_temp_2.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.out_buf.len == buf_len);
+    std.debug.assert(ctx.image_height > 0);
+    std.debug.assert(ctx.image_width > 0);
+
     var time_start: std.Io.Timestamp = undefined;
     var time_end: std.Io.Timestamp = undefined;
     var duration: i96 = undefined;
@@ -224,7 +239,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
     try renderStep(ctx.scene, ctx.renderer, .{
-        .color_buf = ctx.frame_buffers.color_buf,
+        .irrad_buf = ctx.frame_buffers.irrad_buf,
         .albedo_buf = ctx.frame_buffers.albedo_buf,
         .normal_buf = ctx.frame_buffers.normal_buf,
         .depth_buf = ctx.frame_buffers.depth_buf,
@@ -247,7 +262,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    postProcessStep(ctx.post_processing_hdr_chain, ctx.post_processing_final_step, ctx.frame_buffers, ctx.image_height, ctx.image_width);
+    postProcessStep(ctx.post_processing_pipeline, ctx.frame_buffers, ctx.image_height, ctx.image_width);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -268,16 +283,16 @@ fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRend
     return renderer.render(scene, buffers);
 }
 
-fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_processing_last_step: DisplayTransform, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
-    var curr_in: []const LinearColor = frame_buffers.color_buf;
+fn postProcessStep(pipeline: PostProcessingPipeline, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
+    var curr_in: []const LinearColor = frame_buffers.irrad_buf;
     var curr_out = frame_buffers.pp_temp_1;
     var unused_buf = frame_buffers.pp_temp_2;
 
-    for (post_processing_hdr_chain) |p| {
-        p.process(.{
-            .in_color = curr_in,
+    if (pipeline.denoiser) |d| {
+        d.apply(.{
+            .in_irrad = curr_in,
             .temp_buf = unused_buf,
-            .out_color = curr_out,
+            .out_irrad = curr_out,
             .albedo = frame_buffers.albedo_buf,
             .normal = frame_buffers.normal_buf,
             .depth = frame_buffers.depth_buf,
@@ -289,7 +304,11 @@ fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_pro
         std.mem.swap([]LinearColor, &curr_out, &unused_buf);
     }
 
-    post_processing_last_step.process(curr_in, frame_buffers.out_buf);
+    colorRecomposition(frame_buffers.albedo_buf, curr_in, curr_out);
+    curr_in = curr_out;
+    std.mem.swap([]LinearColor, &curr_out, &unused_buf);
+
+    pipeline.display_transform.apply(curr_in, frame_buffers.out_buf);
 }
 
 fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {
@@ -298,16 +317,37 @@ fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std
     const ray_t_range = settings.ray_t_range;
     const max_depth = settings.max_ray_bounces;
 
-    var pixel_color_sum = LinearColor.black;
+    var pixel_irradiance_sum = LinearColor.black;
 
     for(0..settings.sqrt_spp) |sample_j| {
         for (0..settings.sqrt_spp) |sample_i| {
             const ray = camera.getRay(random, x_screen, y_screen, sample_i, sample_j);
-            pixel_color_sum = pixel_color_sum.add(rayColor(ray, scene, ray_t_range, max_depth, random));
+            pixel_irradiance_sum = pixel_irradiance_sum.add(tracePrimaryRay(ray, scene, ray_t_range, max_depth, random));
         }
     }
 
-    out_color.* = pixel_color_sum.scalarMul(pixel_samples_scale);
+    out_color.* = pixel_irradiance_sum.scalarMul(pixel_samples_scale);
+}
+
+fn tracePrimaryRay(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
+    if (depth == 0) {
+        return LinearColor.black;
+    }
+
+    var hit_record: HitRecord = undefined;
+    const hit = scene.hit(ray, ray_t_range, &hit_record);
+
+    if (!hit) return scene.bg_color;
+
+    const scatterRes = hit_record.material.scatter(ray, hit_record, rand);
+    const color_from_scatter = if (scatterRes) |res|
+        // We avoid multiplying by the first hit material attenuation to keep the irradiance information
+        rayColor(res.scattered_ray, scene, ray_t_range, depth - 1, rand)
+    else
+        LinearColor.black;
+
+    const color_from_emission = hit_record.material.emit() orelse LinearColor.black;
+    return color_from_scatter.add(color_from_emission);
 }
 
 fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
@@ -318,18 +358,7 @@ fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, ra
     var hit_record: HitRecord = undefined;
     const hit = scene.hit(ray, ray_t_range, &hit_record);
 
-    if (!hit) {
-        return scene.bg_color;
-
-        // const grad = LinearGradient {
-        //     .start_color = LinearColor.white,
-        //     .end_color = LinearColor.init(0.25, 0.5, 1.0)
-        // };
-
-        // const normalized_dir = ray.dir.normalized();
-        // return grad.at(0.5 * (normalized_dir.y + 1.0));
-    }
-
+    if (!hit) return scene.bg_color;
 
     const scatterRes = hit_record.material.scatter(ray, hit_record, rand);
     const color_from_scatter = if (scatterRes) |res|

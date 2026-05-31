@@ -16,14 +16,25 @@ const Float = config.Float;
 const HitRecord = geometry.HitRecord;
 
 const print = std.debug.print;
+const getDemodulationColor = post_processing.getDemodulationColor;
 
 pub const RendererType = enum { Serial, Parallel };
 
 pub const FrameBuffers = struct {
     color_buf: []LinearColor,
-    pp_temp_in: []LinearColor,
-    pp_temp_out: []LinearColor,
+    albedo_buf: []LinearColor,
+    normal_buf: []Vec3,
+    depth_buf: []Float,
+    pp_temp_1: []LinearColor,
+    pp_temp_2: []LinearColor,
     out_buf: []u8
+};
+
+pub const FrameBuffersRenderView = struct {
+    color_buf: []LinearColor,
+    albedo_buf: []LinearColor,
+    normal_buf: []Vec3,
+    depth_buf: []Float,
 };
 
 pub const PipelineContext = struct {
@@ -32,6 +43,8 @@ pub const PipelineContext = struct {
     post_processing_hdr_chain: []const PostProcessorHdr = &.{},
     post_processing_final_step: DisplayTransform,
     frame_buffers: FrameBuffers,
+    image_height: u16,
+    image_width: u16,
     scene: *const Scene,
     time_report: bool = false,
 };
@@ -81,9 +94,9 @@ pub const Renderer = union(RendererType) {
     Serial: SerialPathTracer,
     Parallel: ParallelPathTracer,
 
-    pub fn render(self: Renderer, scene: *const Scene, out_color: []LinearColor) !void {
+    pub fn render(self: Renderer, scene: *const Scene, buffers: FrameBuffersRenderView) !void {
         switch (self) {
-            inline else => |renderer| return renderer.render(scene, out_color)
+            inline else => |renderer| return renderer.render(scene, buffers)
         }
     }
 };
@@ -92,7 +105,7 @@ pub const SerialPathTracer = struct {
     settings: InternalRenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: SerialPathTracer, scene: *const Scene, out_color: []LinearColor) void {
+    pub fn render(self: SerialPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
@@ -105,8 +118,12 @@ pub const SerialPathTracer = struct {
 
         for (0..image_height) |y_screen| {
             for (0..image_width) |x_screen| {
-                const pixel_color_index = y_screen * image_width + x_screen;
-                colorPixel(self.settings, scene, random, x_screen, y_screen, &out_color[pixel_color_index]);
+                const pixel_index = y_screen * image_width + x_screen;
+
+                const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
+                updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, buffers);
+
+                colorPixel(self.settings, scene, random, x_screen, y_screen, &buffers.color_buf[pixel_index]);
             }
 
             if (task_node) |n| n.completeOne();
@@ -119,7 +136,7 @@ pub const ParallelPathTracer = struct {
     settings: InternalRenderSettings,
     progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: ParallelPathTracer, scene: *const Scene, out_color: []LinearColor) !void {
+    pub fn render(self: ParallelPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView) !void {
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
 
@@ -132,9 +149,14 @@ pub const ParallelPathTracer = struct {
         for (0..image_height) |y_screen| {
             const start = y_screen * image_width;
             const end = start + image_width;
-            const row = out_color[start..end];
+            const row_buffers = FrameBuffersRenderView {
+                .color_buf = buffers.color_buf[start..end],
+                .albedo_buf = buffers.albedo_buf[start..end],
+                .normal_buf = buffers.normal_buf[start..end],
+                .depth_buf = buffers.depth_buf[start..end],
+            };
 
-            group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row, task_node }) catch |err| switch (err) {
+            group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row_buffers, task_node }) catch |err| switch (err) {
                 error.ConcurrencyUnavailable => {
                     std.debug.print("Error: concurrency unavailable\n", .{});
                     return;
@@ -145,7 +167,7 @@ pub const ParallelPathTracer = struct {
         try group.await(self.io);
     }
 
-    fn renderRow(self: ParallelPathTracer, scene: *const Scene, y_screen: usize, row: []LinearColor, progress_node: ?std.Progress.Node) void {
+    fn renderRow(self: ParallelPathTracer, scene: *const Scene, y_screen: usize, row_buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
 
@@ -160,13 +182,38 @@ pub const ParallelPathTracer = struct {
         const random = prng.random();
 
         for (0..image_width) |x_screen| {
-            const pixel_color_index = x_screen;
-            colorPixel(self.settings, scene, random, x_screen, y_screen, &row[pixel_color_index]);
+            const pixel_index = x_screen;
+
+            const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
+            updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, row_buffers);
+
+            colorPixel(self.settings, scene, random, x_screen, y_screen, &row_buffers.color_buf[pixel_index]);
         }
 
         if (progress_node) |n| n.completeOne();
     }
 };
+
+fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, index: usize, buffers: FrameBuffersRenderView) void {
+    var hit_record: HitRecord = undefined;
+    const hit = scene.hit(ray, ray_t_range, &hit_record);
+
+    if (!hit) {
+        buffers.albedo_buf[index] = LinearColor.white;
+        buffers.normal_buf[index] = ray.dir.normalized();
+        buffers.depth_buf[index]  = 0.0;
+        return;
+    }
+
+    buffers.albedo_buf[index] = getDemodulationColor(hit_record.material);
+    buffers.normal_buf[index] = hit_record.normal;
+
+    const depth = -Vec3.dot(scene.camera._forward, hit_record.point.sub(ray.origin));
+    std.debug.assert(depth > 0.0);
+    const inv_depth = 1.0 / (depth + 2 * std.math.floatEps(Float));
+
+    buffers.depth_buf[index] = inv_depth;
+}
 
 pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     var time_start: std.Io.Timestamp = undefined;
@@ -176,7 +223,12 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Render started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    try renderStep(ctx.scene, ctx.renderer, ctx.frame_buffers.color_buf);
+    try renderStep(ctx.scene, ctx.renderer, .{
+        .color_buf = ctx.frame_buffers.color_buf,
+        .albedo_buf = ctx.frame_buffers.albedo_buf,
+        .normal_buf = ctx.frame_buffers.normal_buf,
+        .depth_buf = ctx.frame_buffers.depth_buf,
+    });
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -195,7 +247,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    postProcessStep(ctx.post_processing_hdr_chain, ctx.post_processing_final_step, &ctx.frame_buffers);
+    postProcessStep(ctx.post_processing_hdr_chain, ctx.post_processing_final_step, ctx.frame_buffers, ctx.image_height, ctx.image_width);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -212,19 +264,25 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     }
 }
 
-fn renderStep(scene: *const Scene, renderer: Renderer, out_buf: []LinearColor) !void {
-    return renderer.render(scene, out_buf);
+fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRenderView) !void {
+    return renderer.render(scene, buffers);
 }
 
-fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_processing_last_step: DisplayTransform, frame_buffers: *const FrameBuffers) void {
+fn postProcessStep(post_processing_hdr_chain: []const PostProcessorHdr, post_processing_last_step: DisplayTransform, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
     var curr_in: []const LinearColor = frame_buffers.color_buf;
-    var curr_out = frame_buffers.pp_temp_in;
-    var unused_buf = frame_buffers.pp_temp_out;
+    var curr_out = frame_buffers.pp_temp_1;
+    var unused_buf = frame_buffers.pp_temp_2;
 
     for (post_processing_hdr_chain) |p| {
         p.process(.{
             .in_color = curr_in,
-            .out_color = curr_out
+            .temp_buf = unused_buf,
+            .out_color = curr_out,
+            .albedo = frame_buffers.albedo_buf,
+            .normal = frame_buffers.normal_buf,
+            .depth = frame_buffers.depth_buf,
+            .image_height = image_height,
+            .image_width = image_width
         });
 
         curr_in = curr_out;

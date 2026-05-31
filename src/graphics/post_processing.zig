@@ -7,9 +7,11 @@ const Vec3 = @import("../Vec3.zig");
 const Color = @import("Color.zig");
 const LinearColor = @import("LinearColor.zig");
 const FrameBuffers = @import("scene_3d/rendering.zig").FrameBuffers;
+const Material = @import("scene_3d/materials.zig").Material;
 const Interval = math_utils.Interval(Float);
 
 const expectLinearColorApproxEq = LinearColor.expectLinearColorApproxEq;
+const approxEq = math_utils.approxEq;
 
 pub const ToneMapper = union(enum) {
     reinhard: ReinhardToneMapper,
@@ -84,15 +86,240 @@ pub const GammaCompressionToneMapper = struct {
 
 pub const StepContext = struct {
     in_color: []const LinearColor,
+    temp_buf: []LinearColor,
     out_color: []LinearColor,
+    albedo: []const LinearColor,
+    normal: []const Vec3,
+    depth: []const Float,
+    image_width: u16,
+    image_height: u16,
 };
 
 pub const PostProcessorHdr = union(enum) {
-    // TODO: add denoiser
+    joint_bilateral_denoiser: JointBilateralDenoiser,
+    atrous_denoiser: ATrousDenoiser,
 
     pub fn process(self: PostProcessorHdr, ctx: StepContext) void {
         switch (self) {
             inline else => |p| p.process(ctx)
+        }
+    }
+};
+
+pub const JointBilateralDenoiser = struct {
+    kernel_size: u8,
+    sigma_space: Float,
+    sigma_normal: Float,
+    sigma_depth: Float,
+    // sigma_luma: Float,
+
+    pub fn process(self: JointBilateralDenoiser, ctx: StepContext) void {
+        std.debug.assert(ctx.image_height > 0);
+        std.debug.assert(ctx.image_width > 0);
+        std.debug.assert(self.kernel_size > 0);
+        std.debug.assert(self.kernel_size % 2 != 0);
+        std.debug.assert(self.sigma_space > 0);
+        std.debug.assert(self.sigma_normal > 0);
+        std.debug.assert(self.sigma_depth > 0);
+        // std.debug.assert(self.sigma_luma > 0);
+        const buf_len = ctx.in_color.len;
+        std.debug.assert(ctx.out_color.len == buf_len);
+        std.debug.assert(ctx.albedo.len == buf_len);
+        std.debug.assert(ctx.normal.len == buf_len);
+        std.debug.assert(ctx.depth.len == buf_len);
+
+        const inv_two_sigma_space_sq = 1.0 / (2 * self.sigma_space * self.sigma_space);
+        const inv_two_sigma_normal_sq = 1.0 / (2 * self.sigma_normal * self.sigma_normal);
+        const inv_two_sigma_depth_sq = 1.0 / (2 * self.sigma_depth * self.sigma_depth);
+        // const inv_two_sigma_luma_sq = 1.0 / (2 * self.sigma_luma * self.sigma_luma);
+
+        for (0..ctx.image_height) |y| {
+            for (0..ctx.image_width) |x| {
+                const fx = @as(Float, @floatFromInt(x));
+                const fy = @as(Float, @floatFromInt(y));
+
+                const center_index = y * ctx.image_width + x;
+                const center_depth = ctx.depth[center_index];
+                const center_is_bg = std.math.isInf(center_depth);
+                if (center_is_bg) {
+                    ctx.out_color[center_index] = ctx.in_color[center_index];
+                    continue;
+                }
+
+                const min_albedo: @Vector(3, Float) = @splat(1e-3);
+                const center_irrad = ctx.in_color[center_index].div(.{ .v = @max(ctx.albedo[center_index].v, min_albedo) });
+                // const center_luma = luminanceSrgb(center_irrad);
+                // const center_luma_norm = center_luma / (1.0 + center_luma);
+                const center_normal = ctx.normal[center_index];
+
+                var irrad_sum = LinearColor.black;
+                var weights_sum: Float = 0.0;
+
+                const kernel_radius = self.kernel_size / 2;
+
+                const kernel_x_start = if (x >= kernel_radius) x - kernel_radius else 0;
+                const kernel_x_end =   if (x + kernel_radius < ctx.image_width ) x + kernel_radius else ctx.image_width - 1;
+                const kernel_y_start = if (y >= kernel_radius) y - kernel_radius else 0;
+                const kernel_y_end =   if (y + kernel_radius < ctx.image_height ) y + kernel_radius else ctx.image_height - 1;
+
+                var j: usize = kernel_y_start;
+                while(j <= kernel_y_end) : (j += 1) {
+                    const fj = @as(Float, @floatFromInt(j));
+                    var i: usize = kernel_x_start;
+                    while(i <= kernel_x_end) : (i += 1) {
+                        const fi = @as(Float, @floatFromInt(i));
+
+                        const neighbor_index = j * ctx.image_width + i;
+                        const neighbor_depth = ctx.depth[neighbor_index];
+                        const neighbor_is_bg = std.math.isInf(neighbor_depth);
+                        if (neighbor_is_bg) continue;
+
+                        const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = @max(ctx.albedo[neighbor_index].v, min_albedo) });
+                        // const neighbor_luma = luminanceSrgb(neighbor_irrad);
+                        // const neighbor_luma_norm = neighbor_luma / (1.0 + neighbor_luma);
+                        const neighbor_normal = ctx.normal[neighbor_index];
+
+                        const sq_dist = (fx - fi) * (fx - fi) + (fy - fj) * (fy - fj);
+                        const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
+                        const depth_diff = center_depth - neighbor_depth;
+                        // const luma_delta = center_luma_norm - neighbor_luma_norm;
+
+                        const w_space = @exp(-sq_dist * inv_two_sigma_space_sq);
+                        const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
+                        const w_depth = @exp(-(depth_diff * depth_diff) * inv_two_sigma_depth_sq);
+                        // const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
+
+                        // const total_w = w_space * w_normal * w_depth * w_luma;
+                        const total_w = w_space * w_normal * w_depth;
+
+                        irrad_sum = irrad_sum.add(neighbor_irrad.scalarMul(total_w));
+                        weights_sum += total_w;
+                    }
+                }
+
+                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) center_irrad else irrad_sum.scalarDiv(weights_sum);
+                ctx.out_color[center_index] = center_out_irrad.mul(ctx.albedo[center_index]);
+            }
+        }
+    }
+};
+
+pub const ATrousDenoiser = struct {
+    iterations: u8,
+    sigma_normal: Float,
+    sigma_depth: Float,
+
+    pub const ATrousPassContext = struct {
+        in_color: []const LinearColor,
+        out_color: []LinearColor,
+        albedo: []const LinearColor,
+        normal: []const Vec3,
+        depth: []const Float,
+        image_width: u16,
+        image_height: u16,
+    };
+
+    pub fn process(self: ATrousDenoiser, ctx: StepContext) void {
+        var curr_in = ctx.in_color;
+        var curr_out = ctx.out_color;
+        var unused_buf = ctx.temp_buf;
+        var step: usize = 1;
+
+        for(0..self.iterations) |_| {
+            atrousPass(self.sigma_normal, self.sigma_depth, step, .{
+                .in_color = curr_in,
+                .out_color = curr_out,
+                .albedo = ctx.albedo,
+                .normal = ctx.normal,
+                .depth = ctx.depth,
+                .image_height = ctx.image_height,
+                .image_width = ctx.image_width
+            }, );
+
+            curr_in = curr_out;
+            std.mem.swap([]LinearColor, &curr_out, &unused_buf);
+
+            step <<= 1;
+        }
+
+        std.debug.assert(curr_in.len == ctx.out_color.len);
+        if (curr_in.ptr != ctx.out_color.ptr) {
+            @memcpy(ctx.out_color, curr_in);
+        }
+    }
+
+    fn atrousPass(sigma_normal: Float, sigma_depth: Float, step: usize, ctx: ATrousPassContext) void {
+        std.debug.assert(ctx.image_height > 0);
+        std.debug.assert(ctx.image_width > 0);
+        std.debug.assert(sigma_normal > 0);
+        std.debug.assert(sigma_depth > 0);
+        const buf_len = ctx.in_color.len;
+        std.debug.assert(ctx.out_color.len == buf_len);
+        std.debug.assert(ctx.albedo.len == buf_len);
+        std.debug.assert(ctx.normal.len == buf_len);
+        std.debug.assert(ctx.depth.len == buf_len);
+
+        const min_albedo: @Vector(3, Float) = @splat(1e-3);
+        const inv_two_sigma_normal_sq = 1.0 / (2 * sigma_normal * sigma_normal);
+        const inv_two_sigma_depth_sq = 1.0 / (2 * sigma_depth * sigma_depth);
+        const h = [5]Float { 1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0 }; // Wavelet weights
+        const int_step = @as(isize, @intCast(step));
+        const int_height = @as(isize, ctx.image_height);
+        const int_width = @as(isize, ctx.image_width);
+
+        for (0..ctx.image_height) |y| {
+            const int_y = @as(isize, @intCast(y));
+            for (0..ctx.image_width) |x| {
+                const int_x = @as(isize, @intCast(x));
+                const center_index = y * ctx.image_width + x;
+                const center_depth = ctx.depth[center_index];
+                const center_is_bg = std.math.isInf(center_depth);
+                if (center_is_bg) {
+                    ctx.out_color[center_index] = ctx.in_color[center_index];
+                    continue;
+                }
+
+                const center_albedo: @Vector(3, Float) = @max(ctx.albedo[center_index].v, min_albedo);
+                const center_irrad = ctx.in_color[center_index].div(.{ .v = center_albedo });
+                const center_normal = ctx.normal[center_index];
+
+                var irrad_sum = LinearColor.black;
+                var weights_sum: Float = 0.0;
+
+                for (0..5) |ky| {
+                    const neighbor_y = int_y + (@as(isize, @intCast(ky)) - 2) * int_step;
+                    if (neighbor_y < 0 or neighbor_y >= int_height) continue;
+
+                    for (0..5) |kx| {
+                        const neighbor_x = int_x + (@as(isize, @intCast(kx)) - 2) * int_step;
+                        if (neighbor_x < 0 or neighbor_x >= int_width) continue;
+
+                        const neighbor_index = @as(usize, @intCast(neighbor_y)) * ctx.image_width + @as(usize, @intCast(neighbor_x));
+                        const neighbor_depth = ctx.depth[neighbor_index];
+                        const neighbor_is_bg = std.math.isInf(neighbor_depth);
+                        if (neighbor_is_bg) continue;
+
+                        const neighbor_albedo: @Vector(3, Float) = @max(ctx.albedo[neighbor_index].v, min_albedo);
+                        const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = neighbor_albedo });
+                        const neighbor_normal = ctx.normal[neighbor_index];
+
+                        const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
+                        const depth_diff = center_depth - neighbor_depth;
+
+                        const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
+                        const w_depth = @exp(-(depth_diff * depth_diff) * inv_two_sigma_depth_sq);
+
+                        const w_kernel = h[kx] * h[ky];
+                        const total_w = w_kernel * w_normal * w_depth;
+
+                        irrad_sum = irrad_sum.add(neighbor_irrad.scalarMul(total_w));
+                        weights_sum += total_w;
+                    }
+                }
+
+                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) center_irrad else irrad_sum.scalarDiv(weights_sum);
+                ctx.out_color[center_index] = center_out_irrad.mul(ctx.albedo[center_index]);
+            }
         }
     }
 };
@@ -214,6 +441,17 @@ pub const DisplayTransform = struct {
         return .{ .v = @exp((ones / gamma_vec) * @log(c.v)) };
     }
 };
+
+pub fn luminanceSrgb(c: LinearColor) Float {
+    return 0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b();
+}
+
+pub fn getDemodulationColor(mat: *const Material) LinearColor {
+    switch (mat.*) {
+        inline .lambertian, .metal => |m| return m.albedo,
+        inline .dielectic, .diffuse_light => return LinearColor.white,
+    }
+}
 
 const eps = std.math.floatEps(Float);
 

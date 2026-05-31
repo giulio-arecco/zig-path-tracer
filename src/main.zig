@@ -102,11 +102,12 @@ const help_entries = [_]ArgHelp {
 };
 
 pub fn main(init: std.process.Init) !void {
-    // var gpa = std.heap.DebugAllocator(.{}) {};
-    // defer if (gpa.deinit() == .leak) {
-    //     @panic("Memory leak detected!");
-    // };
-    const allocator = init.arena.allocator();
+    var gpa = std.heap.DebugAllocator(.{}) {};
+    defer if (gpa.deinit() == .leak) {
+        @panic("Memory leak detected!");
+    };
+    const allocator = gpa.allocator();
+    // const allocator = init.arena.allocator();
 
     // Parse args
     var buffer: [16]u8 = undefined;
@@ -168,27 +169,43 @@ pub fn main(init: std.process.Init) !void {
     // Create the context for the rendering pipeline
     const image_size = @as(usize, render_settings.image_width) * @as(usize, render_settings.image_height);
     const linear_color_buf = try allocator.alloc(LinearColor, image_size);
+    const albedo_buf = try allocator.alloc(LinearColor, image_size);
+    const normal_buf = try allocator.alloc(Vec3, image_size);
+    const depth_buf = try allocator.alloc(Float, image_size);
     const image_sized_buf_1 = try allocator.alloc(LinearColor, image_size);
     const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
     defer allocator.free(linear_color_buf);
+    defer allocator.free(albedo_buf);
+    defer allocator.free(normal_buf);
+    defer allocator.free(depth_buf);
     defer allocator.free(image_sized_buf_1);
     defer allocator.free(image_sized_buf_2);
 
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,
         .renderer = renderer,
+        .post_processing_hdr_chain = &.{ .{ .atrous_denoiser = .{
+            .iterations = 4,
+            .sigma_normal = 0.012,
+            .sigma_depth = 7e-4,
+        }}},
         .post_processing_final_step = .{
-            .tone_mapper = .{ .extended_reinhard = .{ .white = 1.0 } },
+            .tone_mapper = .{ .extended_reinhard = .{ .white = 4.0 } },
             .transform_type = .toSrgb8bit
         },
         .frame_buffers = .{
             .color_buf = linear_color_buf,
-            .pp_temp_in = image_sized_buf_1,
-            .pp_temp_out = image_sized_buf_2,
+            .albedo_buf = albedo_buf,
+            .normal_buf = normal_buf,
+            .depth_buf = depth_buf,
+            .pp_temp_1 = image_sized_buf_1,
+            .pp_temp_2 = image_sized_buf_2,
             .out_buf = memory_map.memory[ppm_header_len..],
         },
         .scene = undefined,
         .time_report = app_config.time_report,
+        .image_height = render_settings.image_height,
+        .image_width = render_settings.image_width
     };
 
     // Init the scene and execute the rendering pipeline

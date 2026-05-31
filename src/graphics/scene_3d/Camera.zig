@@ -85,6 +85,19 @@ pub fn initLookAt(from: Vec3, to: Vec3, vertical_fov: Float, focus_distance: Flo
     return viewportSetup(from, unit_up, unit_right, unit_forward, focus_distance, defocus_angle, vertical_fov, render_settings);
 }
 
+/// Construct a camera ray originating from the camera position directed at the center of pixel x_screen, y_screen.
+pub fn getRayToCenter(self: Camera, x_screen: usize, y_screen: usize) Ray {
+    const pixel_sample = self._pixel_top_left.
+                add(self._pixel_delta_u.scalarMul(@as(Float, @floatFromInt(x_screen)))).
+                add(self._pixel_delta_v.scalarMul(@as(Float, @floatFromInt(y_screen))));
+
+    const ray_origin = self._pos;
+    return .{
+        .origin = ray_origin,
+        .dir = pixel_sample.sub(ray_origin),
+    };
+}
+
 /// Construct a camera ray originating from the defocus disk and directed at a randomly sampled point around the pixel location x_screen, y_screen for stratified sample square sample_i, sample_j.
 pub fn getRay(self: Camera, rand: std.Random, x_screen: usize, y_screen: usize, sample_i: usize, sample_j: usize) Ray {
     const offset: Vec3 = sample_square_stratified(rand, self._pixel_cell_side_len, sample_i, sample_j);

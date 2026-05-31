@@ -8,6 +8,7 @@ const Color = @import("Color.zig");
 const LinearColor = @import("LinearColor.zig");
 const FrameBuffers = @import("scene_3d/rendering.zig").FrameBuffers;
 const Material = @import("scene_3d/materials.zig").Material;
+const Camera = @import("scene_3d/Camera.zig");
 const Interval = math_utils.Interval(Float);
 
 const expectLinearColorApproxEq = LinearColor.expectLinearColorApproxEq;
@@ -85,6 +86,7 @@ pub const GammaCompressionToneMapper = struct {
 };
 
 pub const DenoiserContext = struct {
+    camera: Camera,
     in_irrad: []const LinearColor,
     temp_buf: []LinearColor,
     out_irrad: []LinearColor,
@@ -145,6 +147,9 @@ pub const JointBilateralDenoiser = struct {
                 // const center_luma_norm = center_luma / (1.0 + center_luma);
                 const center_normal = ctx.normal[center_index];
 
+                const rayToCenter = ctx.camera.getRayToCenter(x, y);
+                const p_center = rayToCenter.at(center_depth);
+
                 var irrad_sum = LinearColor.black;
                 var weights_sum: Float = 0.0;
 
@@ -164,8 +169,8 @@ pub const JointBilateralDenoiser = struct {
 
                         const neighbor_index = j * ctx.image_width + i;
                         const neighbor_depth = ctx.depth[neighbor_index];
-                        const neighbor_is_bg = std.math.isInf(neighbor_depth);
-                        if (neighbor_is_bg) continue;
+                        // const neighbor_is_bg = neighbor_depth == 0.0;
+                        // if (neighbor_is_bg) continue;
 
                         // const neighbor_irrad = ctx.in_irrad[neighbor_index].div(.{ .v = @max(ctx.albedo[neighbor_index].v, min_albedo) });
                         // const neighbor_luma = luminanceSrgb(neighbor_irrad);
@@ -174,12 +179,20 @@ pub const JointBilateralDenoiser = struct {
 
                         const sq_dist = (fx - fi) * (fx - fi) + (fy - fj) * (fy - fj);
                         const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
-                        const depth_diff = center_depth - neighbor_depth;
+                        const plane_dist = blk: {
+                            if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
+
+                            const rayToNeighbor = ctx.camera.getRayToCenter(i, j);
+                            const p_neighbor = rayToNeighbor.at(neighbor_depth);
+
+                            const v_diff = p_neighbor.sub(p_center);
+                            break :blk @abs(Vec3.dot(v_diff, center_normal));
+                        };
                         // const luma_delta = center_luma_norm - neighbor_luma_norm;
 
                         const w_space = @exp(-sq_dist * inv_two_sigma_space_sq);
                         const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
-                        const w_depth = @exp(-(depth_diff * depth_diff) * inv_two_sigma_depth_sq);
+                        const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
                         // const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
 
                         // const total_w = w_space * w_normal * w_depth * w_luma;
@@ -203,6 +216,7 @@ pub const ATrousDenoiser = struct {
     sigma_depth: Float,
 
     pub const ATrousPassContext = struct {
+        camera: Camera,
         in_irrad: []const LinearColor,
         out_irrad: []LinearColor,
         albedo: []const LinearColor,
@@ -226,6 +240,7 @@ pub const ATrousDenoiser = struct {
 
         for(0..self.iterations) |_| {
             atrousPass(.{
+                .camera = ctx.camera,
                 .in_irrad = curr_in,
                 .out_irrad = curr_out,
                 .albedo = ctx.albedo,
@@ -275,6 +290,9 @@ pub const ATrousDenoiser = struct {
                 // const center_irrad = ctx.in_color[center_index].div(.{ .v = center_albedo });
                 const center_normal = ctx.normal[center_index];
 
+                const rayToCenter = ctx.camera.getRayToCenter(x, y);
+                const p_center = rayToCenter.at(center_depth);
+
                 var irrad_sum = LinearColor.black;
                 var weights_sum: Float = 0.0;
 
@@ -282,24 +300,32 @@ pub const ATrousDenoiser = struct {
                     const neighbor_y = int_y + (@as(isize, @intCast(ky)) - 2) * int_step;
                     if (neighbor_y < 0 or neighbor_y >= int_height) continue;
 
+                    const neighbor_y_usize = @as(usize, @intCast(neighbor_y));
                     for (0..5) |kx| {
                         const neighbor_x = int_x + (@as(isize, @intCast(kx)) - 2) * int_step;
                         if (neighbor_x < 0 or neighbor_x >= int_width) continue;
 
-                        const neighbor_index = @as(usize, @intCast(neighbor_y)) * ctx.image_width + @as(usize, @intCast(neighbor_x));
+                        const neighbor_x_usize = @as(usize, @intCast(neighbor_x));
+                        const neighbor_index = neighbor_y_usize * ctx.image_width + neighbor_x_usize;
                         const neighbor_depth = ctx.depth[neighbor_index];
-                        const neighbor_is_bg = std.math.isInf(neighbor_depth);
-                        if (neighbor_is_bg) continue;
 
                         // const neighbor_albedo: @Vector(3, Float) = @max(ctx.albedo[neighbor_index].v, min_albedo);
                         // const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = neighbor_albedo });
                         const neighbor_normal = ctx.normal[neighbor_index];
 
                         const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
-                        const depth_diff = center_depth - neighbor_depth;
+                        const plane_dist = blk: {
+                            if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
+
+                            const rayToNeighbor = ctx.camera.getRayToCenter(neighbor_x_usize, neighbor_y_usize);
+                            const p_neighbor = rayToNeighbor.at(neighbor_depth);
+
+                            const v_diff = p_neighbor.sub(p_center);
+                            break :blk @abs(Vec3.dot(v_diff, center_normal));
+                        };
 
                         const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
-                        const w_depth = @exp(-(depth_diff * depth_diff) * inv_two_sigma_depth_sq);
+                        const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
 
                         const w_kernel = h[kx] * h[ky];
                         const total_w = w_kernel * w_normal * w_depth;

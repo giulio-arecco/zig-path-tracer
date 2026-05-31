@@ -9,6 +9,7 @@ const Ray = @import("Ray.zig");
 const LinearColor = @import("../LinearColor.zig");
 const Vec3 = @import("../../Vec3.zig");
 const Denoiser = post_processing.Denoiser;
+const Camera = @import("Camera.zig");
 const DisplayTransform = post_processing.DisplayTransform;
 const AppConfig = config.AppConfig;
 const Interval = math_utils.Interval(Float);
@@ -40,6 +41,7 @@ pub const FrameBuffersRenderView = struct {
 
 pub const PipelineContext = struct {
     io: std.Io,
+    camera: Camera,
     renderer: Renderer,
     post_processing_pipeline: PostProcessingPipeline,
     frame_buffers: FrameBuffers,
@@ -204,20 +206,15 @@ fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, inde
     const hit = scene.hit(ray, ray_t_range, &hit_record);
 
     if (!hit) {
-        buffers.albedo_buf[index] = LinearColor.white;
+        buffers.albedo_buf[index] = LinearColor.black;
         buffers.normal_buf[index] = ray.dir.normalized();
-        buffers.depth_buf[index]  = 0.0;
+        buffers.depth_buf[index]  = std.math.inf(Float);
         return;
     }
 
     buffers.albedo_buf[index] = getRecompositionAlbedo(hit_record.material);
     buffers.normal_buf[index] = hit_record.normal;
-
-    const depth = -Vec3.dot(scene.camera._forward, hit_record.point.sub(ray.origin));
-    std.debug.assert(depth > 0.0);
-    const inv_depth = 1.0 / (depth + 2 * std.math.floatEps(Float));
-
-    buffers.depth_buf[index] = inv_depth;
+    buffers.depth_buf[index] = hit_record.t;
 }
 
 pub fn executeRenderPipeline(ctx: PipelineContext) !void {
@@ -262,7 +259,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    postProcessStep(ctx.post_processing_pipeline, ctx.frame_buffers, ctx.image_height, ctx.image_width);
+    postProcessStep(ctx.post_processing_pipeline, ctx.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -283,13 +280,14 @@ fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRend
     return renderer.render(scene, buffers);
 }
 
-fn postProcessStep(pipeline: PostProcessingPipeline, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
+fn postProcessStep(pipeline: PostProcessingPipeline, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
     var curr_in: []const LinearColor = frame_buffers.irrad_buf;
     var curr_out = frame_buffers.pp_temp_1;
     var unused_buf = frame_buffers.pp_temp_2;
 
     if (pipeline.denoiser) |d| {
         d.apply(.{
+            .camera = camera,
             .in_irrad = curr_in,
             .temp_buf = unused_buf,
             .out_irrad = curr_out,

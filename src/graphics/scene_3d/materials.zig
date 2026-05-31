@@ -27,6 +27,15 @@ pub const Material = union(enum) {
             inline else => null
         };
     }
+
+    pub fn getRoughness(self: Material) Float {
+        return switch(self) {
+            .lambertian => 1.0,
+            .metal => |m| m.fuzz,
+            .dielectric => 0.0,
+            .diffuse_light => 1.0,
+        };
+    }
 };
 
 pub const ScatterResult = struct {

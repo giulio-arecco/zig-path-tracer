@@ -183,8 +183,14 @@ pub fn main(init: std.process.Init) !void {
 
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,
+        .camera = undefined,
         .renderer = renderer,
         .post_processing_pipeline = .{
+            .denoiser = .{ .atrous_denoiser = .{
+                .iterations = 4,
+                .sigma_normal = 0.012,
+                .sigma_depth = 0.3,
+            }},
             .display_transform = .{
                 .tone_mapper = .{ .extended_reinhard = .{ .white = 4.0 } },
                 .transform_type = .toSrgb8bit
@@ -418,7 +424,10 @@ fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRe
         20.0,
         10.0,
         0.6,
-        render_settings);
+        render_settings
+    );
+    ctx.camera = camera;
+
     var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 256);
     defer scene.deinit();
 
@@ -513,7 +522,10 @@ fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: InternalRend
         80.0,
         10.0,
         0.0,
-        render_settings);
+        render_settings
+    );
+    ctx.camera = camera;
+
     var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 5);
     defer scene.deinit();
 
@@ -571,6 +583,8 @@ fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: InternalRend
         0.0,
         render_settings
     );
+    ctx.camera = camera;
+
     var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 8);
     defer scene.deinit();
 

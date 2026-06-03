@@ -1,12 +1,15 @@
 const std = @import("std");
 const config = @import("../global_config.zig");
 const math_utils = @import("../math_utils.zig");
+const rendering = @import("scene_3d/rendering.zig");
 
 const Float = config.Float;
 const Vec3 = @import("../Vec3.zig");
 const Color = @import("Color.zig");
 const LinearColor = @import("LinearColor.zig");
-const FrameBuffers = @import("scene_3d/rendering.zig").FrameBuffers;
+const FrameBuffers = rendering.FrameBuffers;
+const GBuffers = rendering.GBuffers;
+const GBuffersReadOnly = rendering.GBuffersReadOnly;
 const Material = @import("scene_3d/materials.zig").Material;
 const Camera = @import("scene_3d/Camera.zig");
 const Interval = math_utils.Interval(Float);
@@ -87,12 +90,10 @@ pub const GammaCompressionToneMapper = struct {
 
 pub const DenoiserContext = struct {
     camera: Camera,
-    in_irrad: []const LinearColor,
-    temp_buf: []LinearColor,
-    out_irrad: []LinearColor,
-    albedo: []const LinearColor,
-    normal: []const Vec3,
-    depth: []const Float,
+    in_out_buf: []LinearColor,
+    ping_pong_buf: []LinearColor,
+    is_specular: bool,
+    g_buffers: GBuffersReadOnly,
     image_width: u16,
     image_height: u16,
 };
@@ -113,7 +114,9 @@ pub const JointBilateralDenoiser = struct {
     sigma_space: Float,
     sigma_normal: Float,
     sigma_depth: Float,
-    // sigma_luma: Float,
+    /// A high tolerance smooths GI noise, but blocks the kernel at sharp irradiance cliffs (like coplanar emissive lights) to reduce ringing.
+    diffuse_sigma_luma: Float,
+    specular_sigma_luma: Float,
 
     pub fn apply(self: JointBilateralDenoiser, ctx: DenoiserContext) void {
         std.debug.assert(self.kernel_size > 0);
@@ -121,12 +124,18 @@ pub const JointBilateralDenoiser = struct {
         std.debug.assert(self.sigma_space > 0);
         std.debug.assert(self.sigma_normal > 0);
         std.debug.assert(self.sigma_depth > 0);
-        // std.debug.assert(self.sigma_luma > 0);
+        std.debug.assert(self.diffuse_sigma_luma > 0);
 
-        const inv_two_sigma_space_sq = 1.0 / (2 * self.sigma_space * self.sigma_space);
-        const inv_two_sigma_normal_sq = 1.0 / (2 * self.sigma_normal * self.sigma_normal);
-        const inv_two_sigma_depth_sq = 1.0 / (2 * self.sigma_depth * self.sigma_depth);
-        // const inv_two_sigma_luma_sq = 1.0 / (2 * self.sigma_luma * self.sigma_luma);
+
+        const inv_two_sigma_normal_sq = 1.0 / (2.0 * self.sigma_normal * self.sigma_normal);
+        const inv_two_sigma_depth_sq = 1.0 / (2.0 * self.sigma_depth * self.sigma_depth);
+        const diffuse_inv_two_sigma_space_sq = 1.0 / (2.0 * self.sigma_space * self.sigma_space);
+        const diffuse_inv_two_sigma_luma_sq = 1.0 / (2.0 * self.diffuse_sigma_luma * self.diffuse_sigma_luma);
+
+        // const albedo_buf = ctx.g_buffers.albedo_buf;
+        const normal_buf = ctx.g_buffers.normal_buf;
+        const depth_buf = ctx.g_buffers.depth_buf;
+        const roughness_buf = ctx.g_buffers.roughness_buf;
 
         for (0..ctx.image_height) |y| {
             for (0..ctx.image_width) |x| {
@@ -134,23 +143,33 @@ pub const JointBilateralDenoiser = struct {
                 const fy = @as(Float, @floatFromInt(y));
 
                 const center_index = y * ctx.image_width + x;
-                const center_depth = ctx.depth[center_index];
+                const center_depth = depth_buf[center_index];
                 const center_is_bg = std.math.isInf(center_depth);
                 if (center_is_bg) {
-                    ctx.out_irrad[center_index] = ctx.in_irrad[center_index];
+                    ctx.ping_pong_buf[center_index] = ctx.in_out_buf[center_index];
                     continue;
                 }
 
-                // const min_albedo: @Vector(3, Float) = @splat(1e-3);
-                // const center_irrad = ctx.in_irrad[center_index].div(.{ .v = @max(ctx.albedo[center_index].v, min_albedo) });
-                // const center_luma = luminanceSrgb(center_irrad);
-                // const center_luma_norm = center_luma / (1.0 + center_luma);
-                const center_normal = ctx.normal[center_index];
+                const center_normal = normal_buf[center_index];
 
                 const rayToCenter = ctx.camera.getRayToCenter(x, y);
                 const p_center = rayToCenter.at(center_depth);
 
-                var irrad_sum = LinearColor.black;
+                const l_center = luminanceSrgb(ctx.in_out_buf[center_index]);
+                const center_luma_norm = l_center / (1.0 + l_center);
+
+                var inv_two_sigma_space_sq = diffuse_inv_two_sigma_space_sq;
+                var inv_two_sigma_luma_sq = diffuse_inv_two_sigma_luma_sq;
+                if (ctx.is_specular) {
+                    // Modulate luma tolerance with roughness to protect sharp reflections.
+                    const modulated_sigma_space = @max(self.sigma_space * roughness_buf[center_index], 1e-3);
+                    inv_two_sigma_space_sq = 1.0 / (2.0 * modulated_sigma_space * modulated_sigma_space);
+
+                    const modulated_sigma_luma = @max(self.specular_sigma_luma * roughness_buf[center_index], 1e-3);
+                    inv_two_sigma_luma_sq = 1.0 / (2.0 * modulated_sigma_luma * modulated_sigma_luma);
+                }
+
+                var color_sum = LinearColor.black;
                 var weights_sum: Float = 0.0;
 
                 const kernel_radius = self.kernel_size / 2;
@@ -168,18 +187,17 @@ pub const JointBilateralDenoiser = struct {
                         const fi = @as(Float, @floatFromInt(i));
 
                         const neighbor_index = j * ctx.image_width + i;
-                        const neighbor_depth = ctx.depth[neighbor_index];
-                        // const neighbor_is_bg = neighbor_depth == 0.0;
-                        // if (neighbor_is_bg) continue;
+                        const neighbor_depth = depth_buf[neighbor_index];
+                        const neighbor_normal = normal_buf[neighbor_index];
 
-                        // const neighbor_irrad = ctx.in_irrad[neighbor_index].div(.{ .v = @max(ctx.albedo[neighbor_index].v, min_albedo) });
-                        // const neighbor_luma = luminanceSrgb(neighbor_irrad);
-                        // const neighbor_luma_norm = neighbor_luma / (1.0 + neighbor_luma);
-                        const neighbor_normal = ctx.normal[neighbor_index];
+                        const l = luminanceSrgb(ctx.in_out_buf[neighbor_index]);
+                        const neighbor_luma_norm = l / (1.0 + l);
 
                         const sq_dist = (fx - fi) * (fx - fi) + (fy - fj) * (fy - fj);
                         const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
+                        const luma_delta = center_luma_norm - neighbor_luma_norm;
                         const plane_dist = blk: {
+                            // Infinite depth mathematically forces w_depth to 0.0, handling background boundaries without explicit branching
                             if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
 
                             const rayToNeighbor = ctx.camera.getRayToCenter(i, j);
@@ -188,44 +206,51 @@ pub const JointBilateralDenoiser = struct {
                             const v_diff = p_neighbor.sub(p_center);
                             break :blk @abs(Vec3.dot(v_diff, center_normal));
                         };
-                        // const luma_delta = center_luma_norm - neighbor_luma_norm;
 
                         const w_space = @exp(-sq_dist * inv_two_sigma_space_sq);
                         const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
                         const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
-                        // const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
+                        const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
 
-                        // const total_w = w_space * w_normal * w_depth * w_luma;
-                        const total_w = w_space * w_normal * w_depth;
+                        const total_w = w_space * w_normal * w_depth * w_luma;
 
-                        irrad_sum = irrad_sum.add(ctx.in_irrad[neighbor_index].scalarMul(total_w));
+                        color_sum = color_sum.add(ctx.in_out_buf[neighbor_index].scalarMul(total_w));
                         weights_sum += total_w;
                     }
                 }
 
-                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) ctx.in_irrad[center_index] else irrad_sum.scalarDiv(weights_sum);
-                ctx.out_irrad[center_index] = center_out_irrad;
+                const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_out_buf[center_index] else color_sum.scalarDiv(weights_sum);
+                ctx.ping_pong_buf[center_index] = center_out;
             }
         }
+
+        @memcpy(ctx.in_out_buf, ctx.ping_pong_buf);
     }
 };
 
 pub const ATrousDenoiser = struct {
-    iterations: u8,
+    diffuse_iterations: u8,
+    specular_iterations: u8,
     sigma_normal: Float,
     sigma_depth: Float,
+    /// A high tolerance smooths GI noise, but blocks the kernel at sharp irradiance cliffs (like coplanar emissive lights) to reduce ringing.
+    diffuse_sigma_luma: Float,
+    specular_sigma_luma: Float,
+
+    pub const h = [5]Float { 1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0 }; // Wavelet weights
 
     pub const ATrousPassContext = struct {
         camera: Camera,
-        in_irrad: []const LinearColor,
-        out_irrad: []LinearColor,
-        albedo: []const LinearColor,
-        normal: []const Vec3,
-        depth: []const Float,
+        in_buf: []LinearColor,
+        out_buf: []LinearColor,
+        is_specular: bool,
+        g_buffers: GBuffersReadOnly,
         image_width: u16,
         image_height: u16,
         sigma_normal: Float,
         sigma_depth: Float,
+        diffuse_sigma_luma: Float,
+        specular_sigma_luma: Float,
         step: usize
     };
 
@@ -233,35 +258,36 @@ pub const ATrousDenoiser = struct {
         std.debug.assert(self.sigma_normal > 0);
         std.debug.assert(self.sigma_depth > 0);
 
-        var curr_in = ctx.in_irrad;
-        var curr_out = ctx.out_irrad;
-        var unused_buf = ctx.temp_buf;
+        var curr_in = ctx.in_out_buf;
+        var curr_out = ctx.ping_pong_buf;
         var step: usize = 1;
 
-        for(0..self.iterations) |_| {
+        const iterations = if (ctx.is_specular) self.specular_iterations else self.diffuse_iterations;
+        for(0..iterations) |_| {
             atrousPass(.{
                 .camera = ctx.camera,
-                .in_irrad = curr_in,
-                .out_irrad = curr_out,
-                .albedo = ctx.albedo,
-                .normal = ctx.normal,
-                .depth = ctx.depth,
+                .in_buf = curr_in,
+                .out_buf = curr_out,
+                .is_specular = ctx.is_specular,
+                .g_buffers = ctx.g_buffers,
                 .image_height = ctx.image_height,
                 .image_width = ctx.image_width,
                 .sigma_normal = self.sigma_normal,
                 .sigma_depth = self.sigma_depth,
+                .diffuse_sigma_luma = self.diffuse_sigma_luma,
+                .specular_sigma_luma = self.specular_sigma_luma,
                 .step = step,
             }, );
 
-            curr_in = curr_out;
-            std.mem.swap([]LinearColor, &curr_out, &unused_buf);
-
+            // Ping-pong buffering minimizes memory footprint by swapping pointers between two shared buffers across all iterations and channels
+            std.mem.swap([]LinearColor, &curr_in, &curr_out);
             step <<= 1;
         }
 
-        std.debug.assert(curr_in.len == ctx.out_irrad.len);
-        if (curr_in.ptr != ctx.out_irrad.ptr) {
-            @memcpy(ctx.out_irrad, curr_in);
+        std.debug.assert(curr_in.len == ctx.in_out_buf.len);
+        // Ensure the final denoised data always lands in the original input buffer if the total number of iterations was odd
+        if (curr_in.ptr != ctx.in_out_buf.ptr) {
+            @memcpy(ctx.in_out_buf, curr_in);
         }
     }
 
@@ -269,31 +295,46 @@ pub const ATrousDenoiser = struct {
         // const min_albedo: @Vector(3, Float) = @splat(1e-3);
         const inv_two_sigma_normal_sq = 1.0 / (2 * ctx.sigma_normal * ctx.sigma_normal);
         const inv_two_sigma_depth_sq = 1.0 / (2 * ctx.sigma_depth * ctx.sigma_depth);
-        const h = [5]Float { 1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0 }; // Wavelet weights
+        const diffuse_inv_two_sigma_luma_sq =
+            if (!ctx.is_specular) 1.0 / (2.0 * ctx.diffuse_sigma_luma * ctx.diffuse_sigma_luma)
+            else undefined;
+
         const int_step = @as(isize, @intCast(ctx.step));
         const int_height = @as(isize, ctx.image_height);
         const int_width = @as(isize, ctx.image_width);
+
+        const normal_buf = ctx.g_buffers.normal_buf;
+        const depth_buf = ctx.g_buffers.depth_buf;
+        const roughness_buf = ctx.g_buffers.roughness_buf;
 
         for (0..ctx.image_height) |y| {
             const int_y = @as(isize, @intCast(y));
             for (0..ctx.image_width) |x| {
                 const int_x = @as(isize, @intCast(x));
                 const center_index = y * ctx.image_width + x;
-                const center_depth = ctx.depth[center_index];
+                const center_depth = depth_buf[center_index];
                 const center_is_bg = std.math.isInf(center_depth);
                 if (center_is_bg) {
-                    ctx.out_irrad[center_index] = ctx.in_irrad[center_index];
+                    ctx.out_buf[center_index] = ctx.in_buf[center_index];
                     continue;
                 }
 
-                // const center_albedo: @Vector(3, Float) = @max(ctx.albedo[center_index].v, min_albedo);
-                // const center_irrad = ctx.in_color[center_index].div(.{ .v = center_albedo });
-                const center_normal = ctx.normal[center_index];
+                const center_normal = normal_buf[center_index];
 
                 const rayToCenter = ctx.camera.getRayToCenter(x, y);
                 const p_center = rayToCenter.at(center_depth);
 
-                var irrad_sum = LinearColor.black;
+                const l_center = luminanceSrgb(ctx.in_buf[center_index]);
+                const center_luma_norm = l_center / (1.0 + l_center);
+
+                const inv_two_sigma_luma_sq = if (ctx.is_specular) blk: {
+                    // Modulate luma tolerance with roughness to protect sharp reflections.
+                    const modulated_sigma_luma = @max(ctx.specular_sigma_luma * roughness_buf[center_index], 1e-3);
+                    break :blk 1.0 / (2.0 * modulated_sigma_luma * modulated_sigma_luma);
+                }
+                else diffuse_inv_two_sigma_luma_sq;
+
+                var color_sum = LinearColor.black;
                 var weights_sum: Float = 0.0;
 
                 for (0..5) |ky| {
@@ -307,14 +348,16 @@ pub const ATrousDenoiser = struct {
 
                         const neighbor_x_usize = @as(usize, @intCast(neighbor_x));
                         const neighbor_index = neighbor_y_usize * ctx.image_width + neighbor_x_usize;
-                        const neighbor_depth = ctx.depth[neighbor_index];
+                        const neighbor_depth = depth_buf[neighbor_index];
+                        const neighbor_normal = normal_buf[neighbor_index];
 
-                        // const neighbor_albedo: @Vector(3, Float) = @max(ctx.albedo[neighbor_index].v, min_albedo);
-                        // const neighbor_irrad = ctx.in_color[neighbor_index].div(.{ .v = neighbor_albedo });
-                        const neighbor_normal = ctx.normal[neighbor_index];
+                        const l = luminanceSrgb(ctx.in_buf[neighbor_index]);
+                        const neighbor_luma_norm = l / (1.0 + l);
 
                         const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
+                        const luma_delta = center_luma_norm - neighbor_luma_norm;
                         const plane_dist = blk: {
+                            // Infinite depth mathematically forces w_depth to 0.0, handling background boundaries without explicit branching
                             if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
 
                             const rayToNeighbor = ctx.camera.getRayToCenter(neighbor_x_usize, neighbor_y_usize);
@@ -326,17 +369,18 @@ pub const ATrousDenoiser = struct {
 
                         const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
                         const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
+                        const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
 
                         const w_kernel = h[kx] * h[ky];
-                        const total_w = w_kernel * w_normal * w_depth;
+                        const total_w = w_kernel * w_normal * w_depth * w_luma;
 
-                        irrad_sum = irrad_sum.add(ctx.in_irrad[neighbor_index].scalarMul(total_w));
+                        color_sum = color_sum.add(ctx.in_buf[neighbor_index].scalarMul(total_w));
                         weights_sum += total_w;
                     }
                 }
 
-                const center_out_irrad = if (approxEq(Float, weights_sum, 0.0)) ctx.in_irrad[center_index] else irrad_sum.scalarDiv(weights_sum);
-                ctx.out_irrad[center_index] = center_out_irrad;
+                const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_buf[center_index] else color_sum.scalarDiv(weights_sum);
+                ctx.out_buf[center_index] = center_out;
             }
         }
     }
@@ -460,16 +504,16 @@ pub const DisplayTransform = struct {
     }
 };
 
-pub fn colorRecomposition(albedo_buf: []const LinearColor, in_irrad: []const LinearColor, out_color: []LinearColor) void {
-    for(in_irrad, albedo_buf, out_color) |irrad, albedo, *color| {
-        color.* = irrad.mul(albedo);
+pub fn colorRecomposition(diffuse_buf: []const LinearColor, specular_buf: []const LinearColor, emission_buf: []const LinearColor, albedo_buf: []const LinearColor, out_buf: []LinearColor) void {
+    for(diffuse_buf, specular_buf, emission_buf, albedo_buf, out_buf) |diffuse, specular, emission, albedo, *out| {
+        out.* = (diffuse.mul(albedo)).add(specular).add(emission);
     }
 }
 
 pub fn getRecompositionAlbedo(mat: *const Material) LinearColor {
     switch (mat.*) {
         inline .lambertian, .metal => |m| return m.albedo,
-        inline .dielectic, .diffuse_light => return LinearColor.white,
+        inline .dielectric, .diffuse_light => return LinearColor.white,
     }
 }
 

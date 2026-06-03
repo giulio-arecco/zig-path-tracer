@@ -168,28 +168,53 @@ pub fn main(init: std.process.Init) !void {
 
     // Create the context for the rendering pipeline
     const image_size = @as(usize, render_settings.image_width) * @as(usize, render_settings.image_height);
-    const irrad_buf = try allocator.alloc(LinearColor, image_size);
+    const diffuse_buf = try allocator.alloc(LinearColor, image_size);
+    defer allocator.free(diffuse_buf);
+
+    const specular_buf = try allocator.alloc(LinearColor, image_size);
+    defer allocator.free(specular_buf);
+
+    const emission_buf = try allocator.alloc(LinearColor, image_size);
+    defer allocator.free(emission_buf);
+
     const albedo_buf = try allocator.alloc(LinearColor, image_size);
-    const normal_buf = try allocator.alloc(Vec3, image_size);
-    const depth_buf = try allocator.alloc(Float, image_size);
-    const image_sized_buf_1 = try allocator.alloc(LinearColor, image_size);
-    const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
-    defer allocator.free(irrad_buf);
     defer allocator.free(albedo_buf);
+
+    const normal_buf = try allocator.alloc(Vec3, image_size);
     defer allocator.free(normal_buf);
+
+    const depth_buf = try allocator.alloc(Float, image_size);
     defer allocator.free(depth_buf);
+
+    const roughness_buf = try allocator.alloc(Float, image_size);
+    defer allocator.free(roughness_buf);
+
+    const image_sized_buf_1 = try allocator.alloc(LinearColor, image_size);
     defer allocator.free(image_sized_buf_1);
+
+    const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
     defer allocator.free(image_sized_buf_2);
+
 
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,
-        .camera = undefined,
         .renderer = renderer,
         .post_processing_pipeline = .{
+            // .denoiser = .{ .joint_bilateral_denoiser = .{
+            //     .kernel_size = 15,
+            //     .sigma_space = 3.5,
+            //     .sigma_normal = 0.15,
+            //     .sigma_depth = 0.04,
+            //     .diffuse_sigma_luma = 0.12,
+            //     .specular_sigma_luma = 0.3
+            // }},
             .denoiser = .{ .atrous_denoiser = .{
-                .iterations = 4,
-                .sigma_normal = 0.012,
-                .sigma_depth = 0.3,
+                .diffuse_iterations = 5,
+                .specular_iterations = 3,
+                .sigma_normal = 0.15,
+                .sigma_depth = 0.04,
+                .diffuse_sigma_luma = 0.12,
+                .specular_sigma_luma = 0.3
             }},
             .display_transform = .{
                 .tone_mapper = .{ .extended_reinhard = .{ .white = 4.0 } },
@@ -197,12 +222,17 @@ pub fn main(init: std.process.Init) !void {
             },
         },
         .frame_buffers = .{
-            .irrad_buf = irrad_buf,
-            .albedo_buf = albedo_buf,
-            .normal_buf = normal_buf,
-            .depth_buf = depth_buf,
-            .pp_temp_1 = image_sized_buf_1,
-            .pp_temp_2 = image_sized_buf_2,
+            .diffuse_buf = diffuse_buf,
+            .specular_buf = specular_buf,
+            .emission_buf = emission_buf,
+            .g_buffers = .{
+                .albedo_buf = albedo_buf,
+                .normal_buf = normal_buf,
+                .depth_buf = depth_buf,
+                .roughness_buf = roughness_buf
+            },
+            .ping_pong_buf_1 = image_sized_buf_1,
+            .ping_pong_buf_2 = image_sized_buf_2,
             .out_buf = memory_map.memory[ppm_header_len..],
         },
         .scene = undefined,
@@ -426,7 +456,6 @@ fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRe
         0.6,
         render_settings
     );
-    ctx.camera = camera;
 
     var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 256);
     defer scene.deinit();
@@ -438,11 +467,11 @@ fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRe
     const center_ground = Vec3.init(0.0, -1000.0, 0.0);
     try scene.add(Hittable.createSphere(center_ground, 1000, ground_material));
 
-    const material_1 = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
+    const material_1 = try scene.createMaterial(.{ .dielectric = .{ .refractive_index = 1.5 } });
     const center_1 = Vec3.init(0.0, 1.0, 0.0);
     try scene.add(Hittable.createSphere(center_1, 1.0, material_1));
 
-    const material_1_inside = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.0 / 1.5 } });
+    const material_1_inside = try scene.createMaterial(.{ .dielectric = .{ .refractive_index = 1.0 / 1.5 } });
     try scene.add(Hittable.createSphere(center_1, 0.5, material_1_inside));
 
     const material_2 = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.4, 0.2, 0.1) } });
@@ -502,7 +531,7 @@ fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRe
                 }
                 else {
                     // glass
-                    const dielectric = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
+                    const dielectric = try scene.createMaterial(.{ .dielectric = .{ .refractive_index = 1.5 } });
                     try scene.add(Hittable.createSphere(center, small_radius, dielectric));
                 }
             }
@@ -524,7 +553,6 @@ fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: InternalRend
         0.0,
         render_settings
     );
-    ctx.camera = camera;
 
     var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 5);
     defer scene.deinit();
@@ -583,7 +611,6 @@ fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: InternalRend
         0.0,
         render_settings
     );
-    ctx.camera = camera;
 
     var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 8);
     defer scene.deinit();
@@ -593,7 +620,8 @@ fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: InternalRend
     const white = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.73, 0.73, 0.73) } });
     const green = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.12, 0.45, 0.15) } });
     const light = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(10.0, 10.0, 10.0) } });
-    const glass = try scene.createMaterial(.{ .dielectic = .{ .refractive_index = 1.5 } });
+    const glass = try scene.createMaterial(.{ .dielectric = .{ .refractive_index = 1.5 } });
+    // const metal = try scene.createMaterial(.{ .metal = .{ .albedo = .init(0.73, 0.73, 0.73), .fuzz = 0.9 } });
 
     // Primitives
     try scene.add(Hittable.createQuad(.init(555.0, 0.0, 0.0),     .init(0.0, 555.0, 0.0),  .init(0.0, 0.0, 555.0), red));

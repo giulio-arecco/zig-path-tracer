@@ -8,8 +8,10 @@ const Scene = @import("Scene.zig");
 const Ray = @import("Ray.zig");
 const LinearColor = @import("../LinearColor.zig");
 const Vec3 = @import("../../Vec3.zig");
-const Denoiser = post_processing.Denoiser;
 const Camera = @import("Camera.zig");
+const Material = @import("materials.zig").Material;
+const Denoiser = post_processing.Denoiser;
+const DenoiserContext = post_processing.DenoiserContext;
 const DisplayTransform = post_processing.DisplayTransform;
 const AppConfig = config.AppConfig;
 const Interval = math_utils.Interval(Float);
@@ -22,26 +24,44 @@ const getRecompositionAlbedo = post_processing.getRecompositionAlbedo;
 
 pub const RendererType = enum { Serial, Parallel };
 
-pub const FrameBuffers = struct {
-    irrad_buf: []LinearColor,
+pub const GBuffers = struct {
     albedo_buf: []LinearColor,
     normal_buf: []Vec3,
     depth_buf: []Float,
-    pp_temp_1: []LinearColor,
-    pp_temp_2: []LinearColor,
+    roughness_buf: []Float
+};
+
+pub const GBuffersReadOnly = struct {
+    albedo_buf: []const LinearColor,
+    normal_buf: []const Vec3,
+    depth_buf: []const Float,
+    roughness_buf: []const Float
+};
+
+pub const FrameBuffers = struct {
+    diffuse_buf: []LinearColor,
+    specular_buf: []LinearColor,
+    emission_buf: []LinearColor,
+    g_buffers: GBuffers,
+    ping_pong_buf_1: []LinearColor,
+    ping_pong_buf_2: []LinearColor,
     out_buf: []u8
 };
 
 pub const FrameBuffersRenderView = struct {
-    irrad_buf: []LinearColor,
-    albedo_buf: []LinearColor,
-    normal_buf: []Vec3,
-    depth_buf: []Float,
+    diffuse_buf: []LinearColor,
+    specular_buf: []LinearColor,
+    emission_buf: []LinearColor,
+    g_buffers: GBuffers
+};
+
+pub const PostProcessingPipeline = struct {
+    denoiser: ?Denoiser = null,
+    display_transform: DisplayTransform,
 };
 
 pub const PipelineContext = struct {
     io: std.Io,
-    camera: Camera,
     renderer: Renderer,
     post_processing_pipeline: PostProcessingPipeline,
     frame_buffers: FrameBuffers,
@@ -49,11 +69,6 @@ pub const PipelineContext = struct {
     image_width: u16,
     scene: *const Scene,
     time_report: bool = false,
-};
-
-pub const PostProcessingPipeline = struct {
-    denoiser: ?Denoiser = null,
-    display_transform: DisplayTransform,
 };
 
 pub const UserRenderSettings = struct {
@@ -97,6 +112,50 @@ pub const InternalRenderSettings = struct {
     }
 };
 
+pub const SplitIrradiance = struct {
+    diffuse: LinearColor,
+    specular: LinearColor,
+    emission: LinearColor,
+
+    pub const allBlack = SplitIrradiance{
+        .diffuse = LinearColor.black,
+        .specular = LinearColor.black,
+        .emission = LinearColor.black
+    };
+
+    pub fn add(a: SplitIrradiance, b: SplitIrradiance) SplitIrradiance {
+        return .{
+            .diffuse = a.diffuse.add(b.diffuse),
+            .specular = a.specular.add(b.specular),
+            .emission = a.emission.add(b.emission),
+        };
+    }
+
+    pub fn initDiffuse(diffuse: LinearColor) SplitIrradiance {
+        return .{
+            .diffuse = diffuse,
+            .specular = LinearColor.black,
+            .emission = LinearColor.black
+        };
+    }
+
+    pub fn initSpecular(specular: LinearColor) SplitIrradiance {
+        return .{
+            .diffuse = LinearColor.black,
+            .specular = specular,
+            .emission = LinearColor.black
+        };
+    }
+
+    pub fn initEmission(emission: LinearColor) SplitIrradiance {
+        return .{
+            .diffuse = LinearColor.black,
+            .specular = LinearColor.black,
+            .emission = emission
+        };
+    }
+};
+
 pub const Renderer = union(RendererType) {
     Serial: SerialPathTracer,
     Parallel: ParallelPathTracer,
@@ -130,7 +189,11 @@ pub const SerialPathTracer = struct {
                 const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
                 updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, buffers);
 
-                colorPixel(self.settings, scene, random, x_screen, y_screen, &buffers.irrad_buf[pixel_index]);
+                const split_irrad = colorPixel(self.settings, scene, random, x_screen, y_screen);
+
+                buffers.diffuse_buf[pixel_index] = split_irrad.diffuse;
+                buffers.specular_buf[pixel_index] = split_irrad.specular;
+                buffers.emission_buf[pixel_index] = split_irrad.emission;
             }
 
             if (task_node) |n| n.completeOne();
@@ -157,10 +220,16 @@ pub const ParallelPathTracer = struct {
             const start = y_screen * image_width;
             const end = start + image_width;
             const row_buffers = FrameBuffersRenderView {
-                .irrad_buf = buffers.irrad_buf[start..end],
-                .albedo_buf = buffers.albedo_buf[start..end],
-                .normal_buf = buffers.normal_buf[start..end],
-                .depth_buf = buffers.depth_buf[start..end],
+                .diffuse_buf = buffers.diffuse_buf[start..end],
+                .specular_buf = buffers.specular_buf[start..end],
+                .emission_buf = buffers.emission_buf[start..end],
+                .g_buffers = .{
+                    .albedo_buf = buffers.g_buffers.albedo_buf[start..end],
+                    .normal_buf = buffers.g_buffers.normal_buf[start..end],
+                    .depth_buf = buffers.g_buffers.depth_buf[start..end],
+                    .roughness_buf = buffers.g_buffers.roughness_buf[start..end]
+                }
+
             };
 
             group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row_buffers, task_node }) catch |err| switch (err) {
@@ -194,7 +263,11 @@ pub const ParallelPathTracer = struct {
             const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
             updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, row_buffers);
 
-            colorPixel(self.settings, scene, random, x_screen, y_screen, &row_buffers.irrad_buf[pixel_index]);
+            const split_irrad = colorPixel(self.settings, scene, random, x_screen, y_screen);
+
+            row_buffers.diffuse_buf[pixel_index] = split_irrad.diffuse;
+            row_buffers.specular_buf[pixel_index] = split_irrad.specular;
+            row_buffers.emission_buf[pixel_index] = split_irrad.emission;
         }
 
         if (progress_node) |n| n.completeOne();
@@ -206,24 +279,31 @@ fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, inde
     const hit = scene.hit(ray, ray_t_range, &hit_record);
 
     if (!hit) {
-        buffers.albedo_buf[index] = LinearColor.black;
-        buffers.normal_buf[index] = ray.dir.normalized();
-        buffers.depth_buf[index]  = std.math.inf(Float);
+        // Black albedo prevents sub-pixel irradiance leaks during recomposition.
+        // Infinite depth acts as a mathematical wall for the denoiser's spatial edge-stopping.
+        buffers.g_buffers.albedo_buf[index] = LinearColor.black;
+        buffers.g_buffers.normal_buf[index] = ray.dir.normalized();
+        buffers.g_buffers.depth_buf[index]  = std.math.inf(Float);
+        buffers.g_buffers.roughness_buf[index] = 0.0; // The background is considered emissive
         return;
     }
 
-    buffers.albedo_buf[index] = getRecompositionAlbedo(hit_record.material);
-    buffers.normal_buf[index] = hit_record.normal;
-    buffers.depth_buf[index] = hit_record.t;
+    buffers.g_buffers.albedo_buf[index] = getRecompositionAlbedo(hit_record.material);
+    buffers.g_buffers.normal_buf[index] = hit_record.normal;
+    buffers.g_buffers.depth_buf[index] = hit_record.t;
+    buffers.g_buffers.roughness_buf[index] = hit_record.material.getRoughness();
 }
 
 pub fn executeRenderPipeline(ctx: PipelineContext) !void {
-    const buf_len = ctx.frame_buffers.irrad_buf.len;
-    std.debug.assert(ctx.frame_buffers.albedo_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.normal_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.depth_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.pp_temp_1.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.pp_temp_2.len == buf_len);
+    const buf_len = ctx.frame_buffers.diffuse_buf.len;
+    std.debug.assert(ctx.frame_buffers.specular_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.emission_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.albedo_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.normal_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.depth_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.roughness_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.ping_pong_buf_1.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.ping_pong_buf_2.len == buf_len);
     std.debug.assert(ctx.frame_buffers.out_buf.len == buf_len);
     std.debug.assert(ctx.image_height > 0);
     std.debug.assert(ctx.image_width > 0);
@@ -236,10 +316,15 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
     try renderStep(ctx.scene, ctx.renderer, .{
-        .irrad_buf = ctx.frame_buffers.irrad_buf,
-        .albedo_buf = ctx.frame_buffers.albedo_buf,
-        .normal_buf = ctx.frame_buffers.normal_buf,
-        .depth_buf = ctx.frame_buffers.depth_buf,
+        .diffuse_buf = ctx.frame_buffers.diffuse_buf,
+        .specular_buf = ctx.frame_buffers.specular_buf,
+        .emission_buf = ctx.frame_buffers.emission_buf,
+        .g_buffers = .{
+            .albedo_buf = ctx.frame_buffers.g_buffers.albedo_buf,
+            .normal_buf = ctx.frame_buffers.g_buffers.normal_buf,
+            .depth_buf = ctx.frame_buffers.g_buffers.depth_buf,
+            .roughness_buf = ctx.frame_buffers.g_buffers.roughness_buf
+        }
     });
 
     if (ctx.time_report) {
@@ -259,7 +344,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    postProcessStep(ctx.post_processing_pipeline, ctx.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
+    postProcessStep(ctx.post_processing_pipeline, ctx.scene.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -281,71 +366,86 @@ fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRend
 }
 
 fn postProcessStep(pipeline: PostProcessingPipeline, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
-    var curr_in: []const LinearColor = frame_buffers.irrad_buf;
-    var curr_out = frame_buffers.pp_temp_1;
-    var unused_buf = frame_buffers.pp_temp_2;
+    var denoiser_ctx = DenoiserContext {
+        .camera = camera,
+        .in_out_buf = frame_buffers.diffuse_buf,
+        .ping_pong_buf = frame_buffers.ping_pong_buf_1,
+        .is_specular = false,
+        .g_buffers = .{
+            .albedo_buf = frame_buffers.g_buffers.albedo_buf,
+            .normal_buf = frame_buffers.g_buffers.normal_buf,
+            .depth_buf = frame_buffers.g_buffers.depth_buf,
+            .roughness_buf = frame_buffers.g_buffers.roughness_buf,
+        },
+        .image_height = image_height,
+        .image_width = image_width
+    };
 
     if (pipeline.denoiser) |d| {
-        d.apply(.{
-            .camera = camera,
-            .in_irrad = curr_in,
-            .temp_buf = unused_buf,
-            .out_irrad = curr_out,
-            .albedo = frame_buffers.albedo_buf,
-            .normal = frame_buffers.normal_buf,
-            .depth = frame_buffers.depth_buf,
-            .image_height = image_height,
-            .image_width = image_width
-        });
+        d.apply(denoiser_ctx);
 
-        curr_in = curr_out;
-        std.mem.swap([]LinearColor, &curr_out, &unused_buf);
+        denoiser_ctx.in_out_buf = frame_buffers.specular_buf;
+        denoiser_ctx.is_specular = true;
+
+        d.apply(denoiser_ctx);
     }
 
-    colorRecomposition(frame_buffers.albedo_buf, curr_in, curr_out);
-    curr_in = curr_out;
-    std.mem.swap([]LinearColor, &curr_out, &unused_buf);
+    colorRecomposition(frame_buffers.diffuse_buf, frame_buffers.specular_buf, frame_buffers.emission_buf, frame_buffers.g_buffers.albedo_buf, frame_buffers.ping_pong_buf_1);
 
-    pipeline.display_transform.apply(curr_in, frame_buffers.out_buf);
+    pipeline.display_transform.apply(frame_buffers.ping_pong_buf_1, frame_buffers.out_buf);
 }
 
-fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize, out_color: *LinearColor) void {
+fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize) SplitIrradiance {
     const camera = scene.camera;
     const pixel_samples_scale = settings.pixel_samples_scale;
     const ray_t_range = settings.ray_t_range;
     const max_depth = settings.max_ray_bounces;
 
-    var pixel_irradiance_sum = LinearColor.black;
+    var pixel_split_irrad = SplitIrradiance {
+        .diffuse = LinearColor.black,
+        .specular = LinearColor.black,
+        .emission = LinearColor.black,
+    };
 
     for(0..settings.sqrt_spp) |sample_j| {
         for (0..settings.sqrt_spp) |sample_i| {
             const ray = camera.getRay(random, x_screen, y_screen, sample_i, sample_j);
-            pixel_irradiance_sum = pixel_irradiance_sum.add(tracePrimaryRay(ray, scene, ray_t_range, max_depth, random));
+            const color_data = tracePrimaryRay(ray, scene, ray_t_range, max_depth, random);
+            pixel_split_irrad = pixel_split_irrad.add(color_data);
         }
     }
 
-    out_color.* = pixel_irradiance_sum.scalarMul(pixel_samples_scale);
+    pixel_split_irrad.diffuse = pixel_split_irrad.diffuse.scalarMul(pixel_samples_scale);
+    pixel_split_irrad.specular = pixel_split_irrad.specular.scalarMul(pixel_samples_scale);
+    pixel_split_irrad.emission = pixel_split_irrad.emission.scalarMul(pixel_samples_scale);
+    return pixel_split_irrad;
 }
 
-fn tracePrimaryRay(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
+fn tracePrimaryRay(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) SplitIrradiance {
     if (depth == 0) {
-        return LinearColor.black;
+        return SplitIrradiance.allBlack;
     }
 
     var hit_record: HitRecord = undefined;
     const hit = scene.hit(ray, ray_t_range, &hit_record);
 
-    if (!hit) return scene.bg_color;
+    if (!hit) return .initEmission(scene.bg_color);
 
-    const scatterRes = hit_record.material.scatter(ray, hit_record, rand);
-    const color_from_scatter = if (scatterRes) |res|
-        // We avoid multiplying by the first hit material attenuation to keep the irradiance information
-        rayColor(res.scattered_ray, scene, ray_t_range, depth - 1, rand)
-    else
-        LinearColor.black;
+    var result = SplitIrradiance.allBlack;
 
-    const color_from_emission = hit_record.material.emit() orelse LinearColor.black;
-    return color_from_scatter.add(color_from_emission);
+    result.emission = hit_record.material.emit() orelse LinearColor.black;
+
+    if (hit_record.material.scatter(ray, hit_record, rand)) |res| {
+        const incoming_light = rayColor(res.scattered_ray, scene, ray_t_range, depth - 1, rand);
+        switch (res.scatter_type) {
+            // Diffuse accumulates pure irradiance (albedo is applied later in the pipeline).
+            .diffuse => result.diffuse = incoming_light,
+            // Specular relies on view-dependent attenuation. We apply it right away to bake the reflection color.
+            .specular => result.specular = incoming_light.mul(res.attenuation),
+        }
+    }
+
+    return result;
 }
 
 fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {

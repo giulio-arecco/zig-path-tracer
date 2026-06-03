@@ -11,7 +11,7 @@ const dot = Vec3.dot;
 pub const Material = union(enum) {
     lambertian: Lambertian,
     metal: Metal,
-    dielectic: Dielectric,
+    dielectric: Dielectric,
     diffuse_light: DiffuseLight,
 
     pub fn scatter(self: Material, ray: Ray, hit: HitRecord, rand: std.Random) ?ScatterResult {
@@ -38,9 +38,12 @@ pub const Material = union(enum) {
     }
 };
 
+pub const ScatterType = enum { diffuse, specular };
+
 pub const ScatterResult = struct {
     scattered_ray: Ray,
-    attenuation: LinearColor
+    scatter_type: ScatterType,
+    attenuation: LinearColor,
 };
 
 pub const Lambertian = struct {
@@ -56,7 +59,8 @@ pub const Lambertian = struct {
 
         return .{
             .scattered_ray = scattered_ray,
-            .attenuation = self.albedo
+            .attenuation = self.albedo,
+            .scatter_type = .diffuse
         };
     }
 };
@@ -76,7 +80,8 @@ pub const Metal = struct {
 
         return if (dot(scatter_dir, hit.normal) <= 0) null else .{
             .scattered_ray = scattered_ray,
-            .attenuation = self.albedo
+            .attenuation = self.albedo,
+            .scatter_type = .specular
         };
     }
 };
@@ -102,12 +107,20 @@ pub const Dielectric = struct {
             // Total internal (or external) reflection
             const reflected_dir = Vec3.reflectOnUnit(unit_dir, hit.normal);
             const reflected_ray = Ray { .origin = hit.point, .dir = reflected_dir };
-            return .{ .scattered_ray = reflected_ray, .attenuation = attenuation };
+            return .{
+                .scattered_ray = reflected_ray,
+                .attenuation = attenuation,
+                .scatter_type = .specular
+            };
         }
         else {
             const refracted_dir = Vec3.refract(unit_dir, hit.normal, ri);
             const refracted_ray = Ray { .origin = hit.point, .dir = refracted_dir };
-            return .{ .scattered_ray = refracted_ray, .attenuation = attenuation } ;
+            return .{
+                .scattered_ray = refracted_ray,
+                .attenuation = attenuation,
+                .scatter_type = .specular
+            };
         }
     }
 

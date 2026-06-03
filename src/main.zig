@@ -11,6 +11,7 @@ const math_utils = @import("math_utils.zig");
 
 const Vec3 = @import("Vec3.zig");
 const SceneId = config.SceneId;
+const DenoiserType = config.DenoiserType;
 const AppConfig = config.AppConfig;
 const LinearColor = graphics.LinearColor;
 const Scene = graphics.scene_3d.Scene;
@@ -84,6 +85,12 @@ const help_entries = [_]ArgHelp {
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
     },
     .{
+        .name = "--denoiser",
+        .desc = "Choose a denoiser.",
+        .default = std.fmt.comptimePrint("{t}", .{default_config.denoiser_type}),
+        .values = &.{ "None", "JointBilateral", "ATrous" }
+    },
+    .{
         .name = "--track-progress",
         .desc =
             \\Track the rendering progress (rendered image rows / total image rows).
@@ -98,7 +105,7 @@ const help_entries = [_]ArgHelp {
             \\This argument acts as a toggle, therefore it does not require any value.
         ,
         .default = std.fmt.comptimePrint("{}", .{default_config.time_report}),
-    }
+    },
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -192,30 +199,33 @@ pub fn main(init: std.process.Init) !void {
     const image_sized_buf_1 = try allocator.alloc(LinearColor, image_size);
     defer allocator.free(image_sized_buf_1);
 
-    const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
-    defer allocator.free(image_sized_buf_2);
+    // const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
+    // defer allocator.free(image_sized_buf_2);
 
 
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,
         .renderer = renderer,
         .post_processing_pipeline = .{
-            // .denoiser = .{ .joint_bilateral_denoiser = .{
-            //     .kernel_size = 15,
-            //     .sigma_space = 3.5,
-            //     .sigma_normal = 0.15,
-            //     .sigma_depth = 0.04,
-            //     .diffuse_sigma_luma = 0.12,
-            //     .specular_sigma_luma = 0.3
-            // }},
-            .denoiser = .{ .atrous_denoiser = .{
-                .diffuse_iterations = 5,
-                .specular_iterations = 3,
-                .sigma_normal = 0.15,
-                .sigma_depth = 0.04,
-                .diffuse_sigma_luma = 0.12,
-                .specular_sigma_luma = 0.3
-            }},
+            .denoiser = switch (app_config.denoiser_type) {
+                .None => null,
+                .JointBilateral => .{ .joint_bilateral_denoiser = .{
+                    .kernel_size = 15,
+                    .sigma_space = 3.5,
+                    .sigma_normal = 0.15,
+                    .sigma_depth = 0.04,
+                    .diffuse_sigma_luma = 0.12,
+                    .specular_sigma_luma = 0.3
+                }},
+                .ATrous => .{ .atrous_denoiser = .{
+                    .diffuse_iterations = 5,
+                    .specular_iterations = 3,
+                    .sigma_normal = 0.15,
+                    .sigma_depth = 0.04,
+                    .diffuse_sigma_luma = 0.12,
+                    .specular_sigma_luma = 0.3
+                }},
+            },
             .display_transform = .{
                 .tone_mapper = .{ .extended_reinhard = .{ .white = 4.0 } },
                 .transform_type = .toSrgb8bit
@@ -232,7 +242,7 @@ pub fn main(init: std.process.Init) !void {
                 .roughness_buf = roughness_buf
             },
             .ping_pong_buf_1 = image_sized_buf_1,
-            .ping_pong_buf_2 = image_sized_buf_2,
+            // .ping_pong_buf_2 = image_sized_buf_2,
             .out_buf = memory_map.memory[ppm_header_len..],
         },
         .scene = undefined,
@@ -355,6 +365,24 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
                 }
                 return err;
             };
+        }
+        else if (std.mem.eql(u8, arg_name, "--denoiser")) {
+            const val_str = arg_val orelse args_it.next() orelse {
+                w.print("Error: missing value for '{s}'.\n", .{arg_name}) catch {};
+                return error.MissingArgument;
+            };
+
+            if (std.meta.stringToEnum(DenoiserType, val_str)) |denoiser_t| {
+                app_config.denoiser_type = denoiser_t;
+            } else {
+                w.print("Error: unknown scene '{s}'. The available options are:\n", .{val_str}) catch {};
+                const fields = @typeInfo(DenoiserType).@"enum".fields;
+                inline for (fields) |field| {
+                    w.print("- {s}\n", .{field.name}) catch {};
+                }
+
+                return error.InvalidArgumentValue;
+            }
         }
         else if (std.mem.eql(u8, arg_name, "--track-progress")) {
             if (arg_val != null) {
@@ -720,6 +748,7 @@ test "parseArgs - equal syntax" {
         "zig-pathtracer",
         "--renderer=Serial",
         "--scene=CornellBox",
+        "--denoiser=JointBilateral",
         "--img-height=720",
         "--img-width=1280",
         "--max-bounces=50",
@@ -730,6 +759,7 @@ test "parseArgs - equal syntax" {
     const cfg = cfg_opt.?;
     try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
     try testing.expectEqual(SceneId.CornellBox, cfg.scene_id);
+    try testing.expectEqual(DenoiserType.JointBilateral, cfg.denoiser_type);
     try testing.expectEqual(@as(u16, 720), cfg.user_render_settings.image_height);
     try testing.expectEqual(@as(u16, 1280), cfg.user_render_settings.image_width);
     try testing.expectEqual(@as(u16, 50), cfg.user_render_settings.max_ray_bounces);
@@ -748,6 +778,7 @@ test "parseArgs - space syntax" {
         "zig-pathtracer",
         "--renderer", "Serial",
         "--scene", "ProceduralSpheres",
+        "--denoiser", "ATrous",
         "--img-height", "720",
         "--img-width", "1280",
         "--max-bounces", "50",
@@ -758,6 +789,7 @@ test "parseArgs - space syntax" {
     const cfg = cfg_opt.?;
     try testing.expectEqual(RendererType.Serial, cfg.renderer_type);
     try testing.expectEqual(SceneId.ProceduralSpheres, cfg.scene_id);
+    try testing.expectEqual(DenoiserType.ATrous, cfg.denoiser_type);
     try testing.expectEqual(@as(u16, 720), cfg.user_render_settings.image_height);
     try testing.expectEqual(@as(u16, 1280), cfg.user_render_settings.image_width);
 }
@@ -800,6 +832,9 @@ test "parseArgs - missing value" {
 
     var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--samples"} };
     try testing.expectError(error.MissingArgumentValue, parseArgs(&it2, dummy_term));
+
+    var it3 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--denoiser"} };
+    try testing.expectError(error.MissingArgument, parseArgs(&it3, dummy_term));
 }
 
 test "parseArgs - invalid integer" {
@@ -864,6 +899,9 @@ test "parseArgs - invalid enum values" {
 
     var it2 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--scene=FakeScene"} };
     try testing.expectError(error.InvalidArgumentValue, parseArgs(&it2, dummy_term));
+
+    var it3 = MockArgIterator{ .args = &[_][]const u8{"zig-pathtracer", "--denoiser=FakeDenoiser"} };
+    try testing.expectError(error.InvalidArgumentValue, parseArgs(&it3, dummy_term));
 }
 
 test "parseArgs - unexpected value for time-report, track_progress and help" {

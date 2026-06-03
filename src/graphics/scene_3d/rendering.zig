@@ -44,7 +44,7 @@ pub const FrameBuffers = struct {
     emission_buf: []LinearColor,
     g_buffers: GBuffers,
     ping_pong_buf_1: []LinearColor,
-    ping_pong_buf_2: []LinearColor,
+    // ping_pong_buf_2: []LinearColor,
     out_buf: []u8
 };
 
@@ -303,7 +303,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     std.debug.assert(ctx.frame_buffers.g_buffers.depth_buf.len == buf_len);
     std.debug.assert(ctx.frame_buffers.g_buffers.roughness_buf.len == buf_len);
     std.debug.assert(ctx.frame_buffers.ping_pong_buf_1.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.ping_pong_buf_2.len == buf_len);
+    // std.debug.assert(ctx.frame_buffers.ping_pong_buf_2.len == buf_len);
     std.debug.assert(ctx.frame_buffers.out_buf.len == buf_len);
     std.debug.assert(ctx.image_height > 0);
     std.debug.assert(ctx.image_width > 0);

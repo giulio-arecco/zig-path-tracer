@@ -109,12 +109,12 @@ const help_entries = [_]ArgHelp {
 };
 
 pub fn main(init: std.process.Init) !void {
-    var gpa = std.heap.DebugAllocator(.{}) {};
-    defer if (gpa.deinit() == .leak) {
-        @panic("Memory leak detected!");
-    };
-    const allocator = gpa.allocator();
-    // const allocator = init.arena.allocator();
+    // var gpa = std.heap.DebugAllocator(.{}) {};
+    // defer if (gpa.deinit() == .leak) {
+    //     @panic("Memory leak detected!");
+    // };
+    // const allocator = gpa.allocator();
+    const allocator = init.arena.allocator();
 
     // Parse args
     var buffer: [16]u8 = undefined;
@@ -159,7 +159,7 @@ pub fn main(init: std.process.Init) !void {
 
     const renderer: Renderer = switch (app_config.renderer_type) {
         .Parallel => blk: {
-            comptime if (builtin.single_threaded) unreachable;
+            if (comptime builtin.single_threaded) unreachable;
 
             break :blk .{ .Parallel = .{
                 .io = opt_threaded.?.io(),
@@ -201,7 +201,6 @@ pub fn main(init: std.process.Init) !void {
 
     // const image_sized_buf_2 = try allocator.alloc(LinearColor, image_size);
     // defer allocator.free(image_sized_buf_2);
-
 
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,

@@ -233,9 +233,9 @@ pub const ParallelPathTracer = struct {
             };
 
             group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row_buffers, task_node }) catch |err| switch (err) {
-                error.ConcurrencyUnavailable => {
+                error.ConcurrencyUnavailable => |e| {
                     std.debug.print("Error: concurrency unavailable\n", .{});
-                    return;
+                    return e;
                 },
             };
         }
@@ -344,7 +344,7 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    postProcessStep(ctx.post_processing_pipeline, ctx.scene.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
+    try postProcessStep(ctx.post_processing_pipeline, ctx.io, ctx.scene.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -365,8 +365,9 @@ fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRend
     return renderer.render(scene, buffers);
 }
 
-fn postProcessStep(pipeline: PostProcessingPipeline, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) void {
+fn postProcessStep(pipeline: PostProcessingPipeline, io: std.Io, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) !void {
     var denoiser_ctx = DenoiserContext {
+        .io = io,
         .camera = camera,
         .in_out_buf = frame_buffers.diffuse_buf,
         .ping_pong_buf = frame_buffers.ping_pong_buf_1,
@@ -382,12 +383,12 @@ fn postProcessStep(pipeline: PostProcessingPipeline, camera: Camera, frame_buffe
     };
 
     if (pipeline.denoiser) |d| {
-        d.apply(denoiser_ctx);
+        try d.apply(denoiser_ctx);
 
         denoiser_ctx.in_out_buf = frame_buffers.specular_buf;
         denoiser_ctx.is_specular = true;
 
-        d.apply(denoiser_ctx);
+        try d.apply(denoiser_ctx);
     }
 
     colorRecomposition(frame_buffers.diffuse_buf, frame_buffers.specular_buf, frame_buffers.emission_buf, frame_buffers.g_buffers.albedo_buf, frame_buffers.ping_pong_buf_1);

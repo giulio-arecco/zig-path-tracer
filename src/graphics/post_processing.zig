@@ -2,6 +2,7 @@ const std = @import("std");
 const config = @import("../global_config.zig");
 const math_utils = @import("../math_utils.zig");
 const rendering = @import("scene_3d/rendering.zig");
+const builtin = @import("builtin");
 
 const Float = config.Float;
 const Vec3 = @import("../Vec3.zig");
@@ -89,6 +90,7 @@ pub const GammaCompressionToneMapper = struct {
 };
 
 pub const DenoiserContext = struct {
+    io: std.Io,
     camera: Camera,
     in_out_buf: []LinearColor,
     ping_pong_buf: []LinearColor,
@@ -102,9 +104,9 @@ pub const Denoiser = union(enum) {
     joint_bilateral_denoiser: JointBilateralDenoiser,
     atrous_denoiser: ATrousDenoiser,
 
-    pub fn apply(self: Denoiser, ctx: DenoiserContext) void {
+    pub fn apply(self: Denoiser, ctx: DenoiserContext) !void {
         switch (self) {
-            inline else => |p| p.apply(ctx)
+            inline else => |p| return p.apply(ctx)
         }
     }
 };
@@ -118,7 +120,24 @@ pub const JointBilateralDenoiser = struct {
     diffuse_sigma_luma: Float,
     specular_sigma_luma: Float,
 
-    pub fn apply(self: JointBilateralDenoiser, ctx: DenoiserContext) void {
+    pub const JointBilateralContext = struct {
+        io: std.Io,
+        camera: Camera,
+        in_buf: []LinearColor,
+        out_buf: []LinearColor,
+        is_specular: bool,
+        g_buffers: GBuffersReadOnly,
+        image_width: u16,
+        image_height: u16,
+        sigma_space: Float,
+        sigma_normal: Float,
+        sigma_depth: Float,
+        diffuse_sigma_luma: Float,
+        specular_sigma_luma: Float,
+        kernel_size: u8
+    };
+
+    pub fn apply(self: JointBilateralDenoiser, ctx: DenoiserContext) !void {
         std.debug.assert(self.kernel_size > 0);
         std.debug.assert(self.kernel_size % 2 != 0);
         std.debug.assert(self.sigma_space > 0);
@@ -126,105 +145,141 @@ pub const JointBilateralDenoiser = struct {
         std.debug.assert(self.sigma_depth > 0);
         std.debug.assert(self.diffuse_sigma_luma > 0);
 
+        const jbCtx = JointBilateralContext {
+            .io = ctx.io,
+            .camera = ctx.camera,
+            .in_buf = ctx.in_out_buf,
+            .out_buf = ctx.ping_pong_buf,
+            .is_specular = ctx.is_specular,
+            .g_buffers = ctx.g_buffers,
+            .image_height = ctx.image_height,
+            .image_width = ctx.image_width,
+            .sigma_normal = self.sigma_normal,
+            .sigma_space = self.sigma_space,
+            .sigma_depth = self.sigma_depth,
+            .diffuse_sigma_luma = self.diffuse_sigma_luma,
+            .specular_sigma_luma = self.specular_sigma_luma,
+            .kernel_size = self.kernel_size,
+        };
 
-        const inv_two_sigma_normal_sq = 1.0 / (2.0 * self.sigma_normal * self.sigma_normal);
-        const inv_two_sigma_depth_sq = 1.0 / (2.0 * self.sigma_depth * self.sigma_depth);
-        const diffuse_inv_two_sigma_space_sq = 1.0 / (2.0 * self.sigma_space * self.sigma_space);
-        const diffuse_inv_two_sigma_luma_sq = 1.0 / (2.0 * self.diffuse_sigma_luma * self.diffuse_sigma_luma);
+        if(comptime builtin.single_threaded) {
+            for (0..ctx.image_height) |y| {
+                jointBilateralRow(y, jbCtx);
+            }
+        }
+        else {
+            var group: std.Io.Group = .init;
+            defer group.cancel(ctx.io);
 
-        // const albedo_buf = ctx.g_buffers.albedo_buf;
+            for(0..ctx.image_height) |y| {
+                group.concurrent(ctx.io, jointBilateralRow, .{ y, jbCtx }) catch |err| switch (err) {
+                    error.ConcurrencyUnavailable =>|e| {
+                        std.debug.print("Error: concurrency unavailable\n", .{});
+                        return e;
+                    }
+                };
+            }
+
+            try group.await(ctx.io);
+        }
+
+        @memcpy(ctx.in_out_buf, ctx.ping_pong_buf);
+    }
+
+    fn jointBilateralRow(y_screen: usize, ctx: JointBilateralContext) void {
+        const inv_two_sigma_normal_sq = 1.0 / (2.0 * ctx.sigma_normal * ctx.sigma_normal);
+        const inv_two_sigma_depth_sq = 1.0 / (2.0 * ctx.sigma_depth * ctx.sigma_depth);
+        const diffuse_inv_two_sigma_space_sq = 1.0 / (2.0 * ctx.sigma_space * ctx.sigma_space);
+        const diffuse_inv_two_sigma_luma_sq = 1.0 / (2.0 * ctx.diffuse_sigma_luma * ctx.diffuse_sigma_luma);
+
         const normal_buf = ctx.g_buffers.normal_buf;
         const depth_buf = ctx.g_buffers.depth_buf;
         const roughness_buf = ctx.g_buffers.roughness_buf;
 
-        for (0..ctx.image_height) |y| {
-            for (0..ctx.image_width) |x| {
-                const fx = @as(Float, @floatFromInt(x));
-                const fy = @as(Float, @floatFromInt(y));
+        for (0..ctx.image_width) |x| {
+            const fx = @as(Float, @floatFromInt(x));
+            const fy = @as(Float, @floatFromInt(y_screen));
 
-                const center_index = y * ctx.image_width + x;
-                const center_depth = depth_buf[center_index];
-                const center_is_bg = std.math.isInf(center_depth);
-                if (center_is_bg) {
-                    ctx.ping_pong_buf[center_index] = ctx.in_out_buf[center_index];
-                    continue;
-                }
-
-                const center_normal = normal_buf[center_index];
-
-                const rayToCenter = ctx.camera.getRayToCenter(x, y);
-                const p_center = rayToCenter.at(center_depth);
-
-                const l_center = luminanceSrgb(ctx.in_out_buf[center_index]);
-                const center_luma_norm = l_center / (1.0 + l_center);
-
-                var inv_two_sigma_space_sq = diffuse_inv_two_sigma_space_sq;
-                var inv_two_sigma_luma_sq = diffuse_inv_two_sigma_luma_sq;
-                if (ctx.is_specular) {
-                    // Modulate luma tolerance with roughness to protect sharp reflections.
-                    const modulated_sigma_space = @max(self.sigma_space * roughness_buf[center_index], 1e-3);
-                    inv_two_sigma_space_sq = 1.0 / (2.0 * modulated_sigma_space * modulated_sigma_space);
-
-                    const modulated_sigma_luma = @max(self.specular_sigma_luma * roughness_buf[center_index], 1e-3);
-                    inv_two_sigma_luma_sq = 1.0 / (2.0 * modulated_sigma_luma * modulated_sigma_luma);
-                }
-
-                var color_sum = LinearColor.black;
-                var weights_sum: Float = 0.0;
-
-                const kernel_radius = self.kernel_size / 2;
-
-                const kernel_x_start = if (x >= kernel_radius) x - kernel_radius else 0;
-                const kernel_x_end =   if (x + kernel_radius < ctx.image_width ) x + kernel_radius else ctx.image_width - 1;
-                const kernel_y_start = if (y >= kernel_radius) y - kernel_radius else 0;
-                const kernel_y_end =   if (y + kernel_radius < ctx.image_height ) y + kernel_radius else ctx.image_height - 1;
-
-                var j: usize = kernel_y_start;
-                while(j <= kernel_y_end) : (j += 1) {
-                    const fj = @as(Float, @floatFromInt(j));
-                    var i: usize = kernel_x_start;
-                    while(i <= kernel_x_end) : (i += 1) {
-                        const fi = @as(Float, @floatFromInt(i));
-
-                        const neighbor_index = j * ctx.image_width + i;
-                        const neighbor_depth = depth_buf[neighbor_index];
-                        const neighbor_normal = normal_buf[neighbor_index];
-
-                        const l = luminanceSrgb(ctx.in_out_buf[neighbor_index]);
-                        const neighbor_luma_norm = l / (1.0 + l);
-
-                        const sq_dist = (fx - fi) * (fx - fi) + (fy - fj) * (fy - fj);
-                        const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
-                        const luma_delta = center_luma_norm - neighbor_luma_norm;
-                        const plane_dist = blk: {
-                            // Infinite depth mathematically forces w_depth to 0.0, handling background boundaries without explicit branching
-                            if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
-
-                            const rayToNeighbor = ctx.camera.getRayToCenter(i, j);
-                            const p_neighbor = rayToNeighbor.at(neighbor_depth);
-
-                            const v_diff = p_neighbor.sub(p_center);
-                            break :blk @abs(Vec3.dot(v_diff, center_normal));
-                        };
-
-                        const w_space = @exp(-sq_dist * inv_two_sigma_space_sq);
-                        const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
-                        const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
-                        const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
-
-                        const total_w = w_space * w_normal * w_depth * w_luma;
-
-                        color_sum = color_sum.add(ctx.in_out_buf[neighbor_index].scalarMul(total_w));
-                        weights_sum += total_w;
-                    }
-                }
-
-                const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_out_buf[center_index] else color_sum.scalarDiv(weights_sum);
-                ctx.ping_pong_buf[center_index] = center_out;
+            const center_index = y_screen * ctx.image_width + x;
+            const center_depth = depth_buf[center_index];
+            const center_is_bg = std.math.isInf(center_depth);
+            if (center_is_bg) {
+                ctx.out_buf[center_index] = ctx.in_buf[center_index];
+                continue;
             }
-        }
 
-        @memcpy(ctx.in_out_buf, ctx.ping_pong_buf);
+            const center_normal = normal_buf[center_index];
+
+            const rayToCenter = ctx.camera.getRayToCenter(x, y_screen);
+            const p_center = rayToCenter.at(center_depth);
+
+            const l_center = luminanceSrgb(ctx.in_buf[center_index]);
+            const center_luma_norm = l_center / (1.0 + l_center);
+
+            var inv_two_sigma_space_sq = diffuse_inv_two_sigma_space_sq;
+            var inv_two_sigma_luma_sq = diffuse_inv_two_sigma_luma_sq;
+            if (ctx.is_specular) {
+                // Modulate luma tolerance with roughness to protect sharp reflections.
+                const modulated_sigma_space = @max(ctx.sigma_space * roughness_buf[center_index], 1e-3);
+                inv_two_sigma_space_sq = 1.0 / (2.0 * modulated_sigma_space * modulated_sigma_space);
+
+                const modulated_sigma_luma = @max(ctx.specular_sigma_luma * roughness_buf[center_index], 1e-3);
+                inv_two_sigma_luma_sq = 1.0 / (2.0 * modulated_sigma_luma * modulated_sigma_luma);
+            }
+
+            var color_sum = LinearColor.black;
+            var weights_sum: Float = 0.0;
+
+            const kernel_radius = ctx.kernel_size / 2;
+
+            const kernel_x_start = if (x >= kernel_radius) x - kernel_radius else 0;
+            const kernel_x_end =   if (x + kernel_radius < ctx.image_width ) x + kernel_radius else ctx.image_width - 1;
+            const kernel_y_start = if (y_screen >= kernel_radius) y_screen - kernel_radius else 0;
+            const kernel_y_end =   if (y_screen + kernel_radius < ctx.image_height ) y_screen + kernel_radius else ctx.image_height - 1;
+
+            var j: usize = kernel_y_start;
+            while(j <= kernel_y_end) : (j += 1) {
+                const fj = @as(Float, @floatFromInt(j));
+                var i: usize = kernel_x_start;
+                while(i <= kernel_x_end) : (i += 1) {
+                    const fi = @as(Float, @floatFromInt(i));
+
+                    const neighbor_index = j * ctx.image_width + i;
+                    const neighbor_depth = depth_buf[neighbor_index];
+                    const neighbor_normal = normal_buf[neighbor_index];
+
+                    const l = luminanceSrgb(ctx.in_buf[neighbor_index]);
+                    const neighbor_luma_norm = l / (1.0 + l);
+
+                    const sq_dist = (fx - fi) * (fx - fi) + (fy - fj) * (fy - fj);
+                    const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
+                    const luma_delta = center_luma_norm - neighbor_luma_norm;
+                    const plane_dist = blk: {
+                        // Infinite depth mathematically forces w_depth to 0.0, handling background boundaries without explicit branching
+                        if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
+
+                        const rayToNeighbor = ctx.camera.getRayToCenter(i, j);
+                        const p_neighbor = rayToNeighbor.at(neighbor_depth);
+
+                        const v_diff = p_neighbor.sub(p_center);
+                        break :blk @abs(Vec3.dot(v_diff, center_normal));
+                    };
+
+                    const w_space = @exp(-sq_dist * inv_two_sigma_space_sq);
+                    const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
+                    const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
+                    const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
+
+                    const total_w = w_space * w_normal * w_depth * w_luma;
+
+                    color_sum = color_sum.add(ctx.in_buf[neighbor_index].scalarMul(total_w));
+                    weights_sum += total_w;
+                }
+            }
+
+            const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_buf[center_index] else color_sum.scalarDiv(weights_sum);
+            ctx.out_buf[center_index] = center_out;
+        }
     }
 };
 
@@ -240,6 +295,7 @@ pub const ATrousDenoiser = struct {
     pub const h = [5]Float { 1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0 }; // Wavelet weights
 
     pub const ATrousPassContext = struct {
+        io: std.Io,
         camera: Camera,
         in_buf: []LinearColor,
         out_buf: []LinearColor,
@@ -254,7 +310,7 @@ pub const ATrousDenoiser = struct {
         step: usize
     };
 
-    pub fn apply(self: ATrousDenoiser, ctx: DenoiserContext) void {
+    pub fn apply(self: ATrousDenoiser, ctx: DenoiserContext) !void {
         std.debug.assert(self.sigma_normal > 0);
         std.debug.assert(self.sigma_depth > 0);
 
@@ -264,7 +320,8 @@ pub const ATrousDenoiser = struct {
 
         const iterations = if (ctx.is_specular) self.specular_iterations else self.diffuse_iterations;
         for(0..iterations) |_| {
-            atrousPass(.{
+            try atrousPass(.{
+                .io = ctx.io,
                 .camera = ctx.camera,
                 .in_buf = curr_in,
                 .out_buf = curr_out,
@@ -277,7 +334,7 @@ pub const ATrousDenoiser = struct {
                 .diffuse_sigma_luma = self.diffuse_sigma_luma,
                 .specular_sigma_luma = self.specular_sigma_luma,
                 .step = step,
-            }, );
+            });
 
             // Ping-pong buffering minimizes memory footprint by swapping pointers between two shared buffers across all iterations and channels
             std.mem.swap([]LinearColor, &curr_in, &curr_out);
@@ -291,8 +348,30 @@ pub const ATrousDenoiser = struct {
         }
     }
 
-    fn atrousPass(ctx: ATrousPassContext) void {
-        // const min_albedo: @Vector(3, Float) = @splat(1e-3);
+    fn atrousPass(ctx: ATrousPassContext) !void {
+        if (comptime builtin.single_threaded) {
+            for (0..ctx.image_height) |y| {
+                atrousRow(y, ctx);
+            }
+        }
+        else {
+            var group: std.Io.Group = .init;
+            defer group.cancel(ctx.io);
+
+            for(0..ctx.image_height) |y| {
+                group.concurrent(ctx.io, atrousRow, .{ y, ctx }) catch |err| switch (err) {
+                    error.ConcurrencyUnavailable =>|e| {
+                        std.debug.print("Error: concurrency unavailable\n", .{});
+                        return e;
+                    }
+                };
+            }
+
+            try group.await(ctx.io);
+        }
+    }
+
+    fn atrousRow(y_screen: usize, ctx: ATrousPassContext) void {
         const inv_two_sigma_normal_sq = 1.0 / (2 * ctx.sigma_normal * ctx.sigma_normal);
         const inv_two_sigma_depth_sq = 1.0 / (2 * ctx.sigma_depth * ctx.sigma_depth);
         const diffuse_inv_two_sigma_luma_sq =
@@ -307,81 +386,79 @@ pub const ATrousDenoiser = struct {
         const depth_buf = ctx.g_buffers.depth_buf;
         const roughness_buf = ctx.g_buffers.roughness_buf;
 
-        for (0..ctx.image_height) |y| {
-            const int_y = @as(isize, @intCast(y));
-            for (0..ctx.image_width) |x| {
-                const int_x = @as(isize, @intCast(x));
-                const center_index = y * ctx.image_width + x;
-                const center_depth = depth_buf[center_index];
-                const center_is_bg = std.math.isInf(center_depth);
-                if (center_is_bg) {
-                    ctx.out_buf[center_index] = ctx.in_buf[center_index];
-                    continue;
-                }
-
-                const center_normal = normal_buf[center_index];
-
-                const rayToCenter = ctx.camera.getRayToCenter(x, y);
-                const p_center = rayToCenter.at(center_depth);
-
-                const l_center = luminanceSrgb(ctx.in_buf[center_index]);
-                const center_luma_norm = l_center / (1.0 + l_center);
-
-                const inv_two_sigma_luma_sq = if (ctx.is_specular) blk: {
-                    // Modulate luma tolerance with roughness to protect sharp reflections.
-                    const modulated_sigma_luma = @max(ctx.specular_sigma_luma * roughness_buf[center_index], 1e-3);
-                    break :blk 1.0 / (2.0 * modulated_sigma_luma * modulated_sigma_luma);
-                }
-                else diffuse_inv_two_sigma_luma_sq;
-
-                var color_sum = LinearColor.black;
-                var weights_sum: Float = 0.0;
-
-                for (0..5) |ky| {
-                    const neighbor_y = int_y + (@as(isize, @intCast(ky)) - 2) * int_step;
-                    if (neighbor_y < 0 or neighbor_y >= int_height) continue;
-
-                    const neighbor_y_usize = @as(usize, @intCast(neighbor_y));
-                    for (0..5) |kx| {
-                        const neighbor_x = int_x + (@as(isize, @intCast(kx)) - 2) * int_step;
-                        if (neighbor_x < 0 or neighbor_x >= int_width) continue;
-
-                        const neighbor_x_usize = @as(usize, @intCast(neighbor_x));
-                        const neighbor_index = neighbor_y_usize * ctx.image_width + neighbor_x_usize;
-                        const neighbor_depth = depth_buf[neighbor_index];
-                        const neighbor_normal = normal_buf[neighbor_index];
-
-                        const l = luminanceSrgb(ctx.in_buf[neighbor_index]);
-                        const neighbor_luma_norm = l / (1.0 + l);
-
-                        const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
-                        const luma_delta = center_luma_norm - neighbor_luma_norm;
-                        const plane_dist = blk: {
-                            // Infinite depth mathematically forces w_depth to 0.0, handling background boundaries without explicit branching
-                            if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
-
-                            const rayToNeighbor = ctx.camera.getRayToCenter(neighbor_x_usize, neighbor_y_usize);
-                            const p_neighbor = rayToNeighbor.at(neighbor_depth);
-
-                            const v_diff = p_neighbor.sub(p_center);
-                            break :blk @abs(Vec3.dot(v_diff, center_normal));
-                        };
-
-                        const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
-                        const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
-                        const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
-
-                        const w_kernel = h[kx] * h[ky];
-                        const total_w = w_kernel * w_normal * w_depth * w_luma;
-
-                        color_sum = color_sum.add(ctx.in_buf[neighbor_index].scalarMul(total_w));
-                        weights_sum += total_w;
-                    }
-                }
-
-                const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_buf[center_index] else color_sum.scalarDiv(weights_sum);
-                ctx.out_buf[center_index] = center_out;
+        const int_y = @as(isize, @intCast(y_screen));
+        for (0..ctx.image_width) |x| {
+            const int_x = @as(isize, @intCast(x));
+            const center_index = y_screen * ctx.image_width + x;
+            const center_depth = depth_buf[center_index];
+            const center_is_bg = std.math.isInf(center_depth);
+            if (center_is_bg) {
+                ctx.out_buf[center_index] = ctx.in_buf[center_index];
+                continue;
             }
+
+            const center_normal = normal_buf[center_index];
+
+            const rayToCenter = ctx.camera.getRayToCenter(x, y_screen);
+            const p_center = rayToCenter.at(center_depth);
+
+            const l_center = luminanceSrgb(ctx.in_buf[center_index]);
+            const center_luma_norm = l_center / (1.0 + l_center);
+
+            const inv_two_sigma_luma_sq = if (ctx.is_specular) blk: {
+                // Modulate luma tolerance with roughness to protect sharp reflections.
+                const modulated_sigma_luma = @max(ctx.specular_sigma_luma * roughness_buf[center_index], 1e-3);
+                break :blk 1.0 / (2.0 * modulated_sigma_luma * modulated_sigma_luma);
+            }
+            else diffuse_inv_two_sigma_luma_sq;
+
+            var color_sum = LinearColor.black;
+            var weights_sum: Float = 0.0;
+
+            for (0..5) |ky| {
+                const neighbor_y = int_y + (@as(isize, @intCast(ky)) - 2) * int_step;
+                if (neighbor_y < 0 or neighbor_y >= int_height) continue;
+
+                const neighbor_y_usize = @as(usize, @intCast(neighbor_y));
+                for (0..5) |kx| {
+                    const neighbor_x = int_x + (@as(isize, @intCast(kx)) - 2) * int_step;
+                    if (neighbor_x < 0 or neighbor_x >= int_width) continue;
+
+                    const neighbor_x_usize = @as(usize, @intCast(neighbor_x));
+                    const neighbor_index = neighbor_y_usize * ctx.image_width + neighbor_x_usize;
+                    const neighbor_depth = depth_buf[neighbor_index];
+                    const neighbor_normal = normal_buf[neighbor_index];
+
+                    const l = luminanceSrgb(ctx.in_buf[neighbor_index]);
+                    const neighbor_luma_norm = l / (1.0 + l);
+
+                    const normals_delta = 1.0 - std.math.clamp(Vec3.dot(center_normal, neighbor_normal), -1.0, 1.0);
+                    const luma_delta = center_luma_norm - neighbor_luma_norm;
+                    const plane_dist = blk: {
+                        // Infinite depth mathematically forces w_depth to 0.0, handling background boundaries without explicit branching
+                        if (std.math.isInf(neighbor_depth)) break :blk std.math.inf(Float);
+
+                        const rayToNeighbor = ctx.camera.getRayToCenter(neighbor_x_usize, neighbor_y_usize);
+                        const p_neighbor = rayToNeighbor.at(neighbor_depth);
+
+                        const v_diff = p_neighbor.sub(p_center);
+                        break :blk @abs(Vec3.dot(v_diff, center_normal));
+                    };
+
+                    const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
+                    const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
+                    const w_luma = @exp(-(luma_delta * luma_delta) * inv_two_sigma_luma_sq);
+
+                    const w_kernel = h[kx] * h[ky];
+                    const total_w = w_kernel * w_normal * w_depth * w_luma;
+
+                    color_sum = color_sum.add(ctx.in_buf[neighbor_index].scalarMul(total_w));
+                    weights_sum += total_w;
+                }
+            }
+
+            const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_buf[center_index] else color_sum.scalarDiv(weights_sum);
+            ctx.out_buf[center_index] = center_out;
         }
     }
 };

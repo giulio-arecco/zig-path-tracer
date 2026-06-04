@@ -91,6 +91,7 @@ pub const GammaCompressionToneMapper = struct {
 
 pub const DenoiserContext = struct {
     io: std.Io,
+    progress_node: ?std.Progress.Node = null,
     camera: Camera,
     in_out_buf: []LinearColor,
     ping_pong_buf: []LinearColor,
@@ -122,6 +123,7 @@ pub const JointBilateralDenoiser = struct {
 
     pub const JointBilateralContext = struct {
         io: std.Io,
+        progress_node: ?std.Progress.Node,
         camera: Camera,
         in_buf: []LinearColor,
         out_buf: []LinearColor,
@@ -145,8 +147,13 @@ pub const JointBilateralDenoiser = struct {
         std.debug.assert(self.sigma_depth > 0);
         std.debug.assert(self.diffuse_sigma_luma > 0);
 
-        const jbCtx = JointBilateralContext {
+        const task_name: []const u8 = if (ctx.is_specular) "Joint Bilateral Denoiser (Specular)" else "Joint Bilateral Denoiser (Diffuse)";
+        const task_node = if (ctx.progress_node) |root| root.start(task_name, ctx.image_height) else null;
+        defer if (task_node) |n| n.end();
+
+        const rowContext = JointBilateralContext {
             .io = ctx.io,
+            .progress_node = task_node,
             .camera = ctx.camera,
             .in_buf = ctx.in_out_buf,
             .out_buf = ctx.ping_pong_buf,
@@ -164,7 +171,7 @@ pub const JointBilateralDenoiser = struct {
 
         if(comptime builtin.single_threaded) {
             for (0..ctx.image_height) |y| {
-                jointBilateralRow(y, jbCtx);
+                jointBilateralRow(y, rowContext);
             }
         }
         else {
@@ -172,7 +179,7 @@ pub const JointBilateralDenoiser = struct {
             defer group.cancel(ctx.io);
 
             for(0..ctx.image_height) |y| {
-                group.concurrent(ctx.io, jointBilateralRow, .{ y, jbCtx }) catch |err| switch (err) {
+                group.concurrent(ctx.io, jointBilateralRow, .{ y, rowContext }) catch |err| switch (err) {
                     error.ConcurrencyUnavailable =>|e| {
                         std.debug.print("Error: concurrency unavailable\n", .{});
                         return e;
@@ -280,6 +287,8 @@ pub const JointBilateralDenoiser = struct {
             const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_buf[center_index] else color_sum.scalarDiv(weights_sum);
             ctx.out_buf[center_index] = center_out;
         }
+
+        if (ctx.progress_node) |n| n.completeOne();
     }
 };
 
@@ -296,6 +305,7 @@ pub const ATrousDenoiser = struct {
 
     pub const ATrousPassContext = struct {
         io: std.Io,
+        progress_node: ?std.Progress.Node,
         camera: Camera,
         in_buf: []LinearColor,
         out_buf: []LinearColor,
@@ -319,9 +329,15 @@ pub const ATrousDenoiser = struct {
         var step: usize = 1;
 
         const iterations = if (ctx.is_specular) self.specular_iterations else self.diffuse_iterations;
+
+        const task_name: []const u8 = if (ctx.is_specular) "A Trous Denoiser (Specular)" else "A Trous Denoiser (Diffuse)";
+        const task_node = if (ctx.progress_node) |root| root.start(task_name, iterations) else null;
+        defer if (task_node) |n| n.end();
+
         for(0..iterations) |_| {
             try atrousPass(.{
                 .io = ctx.io,
+                .progress_node = task_node,
                 .camera = ctx.camera,
                 .in_buf = curr_in,
                 .out_buf = curr_out,
@@ -349,9 +365,15 @@ pub const ATrousDenoiser = struct {
     }
 
     fn atrousPass(ctx: ATrousPassContext) !void {
+        const task_node = if (ctx.progress_node) |root| root.start("A-Trous Pass", ctx.image_height) else null;
+        defer if (task_node) |n| n.end();
+
+        var rowContext = ctx;
+        rowContext.progress_node = task_node;
+
         if (comptime builtin.single_threaded) {
             for (0..ctx.image_height) |y| {
-                atrousRow(y, ctx);
+                atrousRow(y, rowContext);
             }
         }
         else {
@@ -359,7 +381,7 @@ pub const ATrousDenoiser = struct {
             defer group.cancel(ctx.io);
 
             for(0..ctx.image_height) |y| {
-                group.concurrent(ctx.io, atrousRow, .{ y, ctx }) catch |err| switch (err) {
+                group.concurrent(ctx.io, atrousRow, .{ y, rowContext }) catch |err| switch (err) {
                     error.ConcurrencyUnavailable =>|e| {
                         std.debug.print("Error: concurrency unavailable\n", .{});
                         return e;
@@ -460,6 +482,8 @@ pub const ATrousDenoiser = struct {
             const center_out = if (approxEq(Float, weights_sum, 0.0)) ctx.in_buf[center_index] else color_sum.scalarDiv(weights_sum);
             ctx.out_buf[center_index] = center_out;
         }
+
+        if (ctx.progress_node) |n| n.completeOne();
     }
 };
 
@@ -469,7 +493,10 @@ pub const DisplayTransform = struct {
 
     pub const DisplayTransformType = enum { toSrgb8bit };
 
-    pub fn apply(self: DisplayTransform, hdr_buf: []const LinearColor, out_buf: []u8) void {
+    pub fn apply(self: DisplayTransform, hdr_buf: []const LinearColor, out_buf: []u8, progress_node: ?std.Progress.Node) void {
+        const task_node = if (progress_node) |root| root.start("Display Transform", out_buf.len) else null;
+        defer if (task_node) |n| n.end();
+
         for(hdr_buf, 0..hdr_buf.len) |lin_col, i| {
             const out_col = switch (self.transform_type) {
                 .toSrgb8bit => self.toSrgb8bit(lin_col)
@@ -477,6 +504,8 @@ pub const DisplayTransform = struct {
 
             const pixel_byte_index = i * 3;
             std.mem.writeInt(u24, out_buf[pixel_byte_index..][0..3], out_col.toPacked(), .big);
+
+            if (task_node) |n| n.completeOne();
         }
     }
 
@@ -581,9 +610,13 @@ pub const DisplayTransform = struct {
     }
 };
 
-pub fn colorRecomposition(diffuse_buf: []const LinearColor, specular_buf: []const LinearColor, emission_buf: []const LinearColor, albedo_buf: []const LinearColor, out_buf: []LinearColor) void {
+pub fn colorRecomposition(diffuse_buf: []const LinearColor, specular_buf: []const LinearColor, emission_buf: []const LinearColor, albedo_buf: []const LinearColor, out_buf: []LinearColor, progress_node: ?std.Progress.Node) void {
+    const task_node = if (progress_node) |root| root.start("Recomposition", out_buf.len) else null;
+    defer if (task_node) |n| n.end();
+
     for(diffuse_buf, specular_buf, emission_buf, albedo_buf, out_buf) |diffuse, specular, emission, albedo, *out| {
         out.* = (diffuse.mul(albedo)).add(specular).add(emission);
+        if (task_node) |n| n.completeOne();
     }
 }
 
@@ -708,7 +741,7 @@ test "DisplayTransform.process" {
     const mapper = ToneMapper{ .clamp = .{} };
     const dt = DisplayTransform{ .tone_mapper = mapper, .transform_type = .toSrgb8bit };
 
-    dt.apply(&hdr_buf, &out_buf);
+    dt.apply(&hdr_buf, &out_buf, null);
 
     const exp_col0 = dt.toSrgb8bit(hdr_buf[0]);
     try std.testing.expectEqual(exp_col0.r, out_buf[0]);
@@ -725,6 +758,6 @@ test "DisplayTransform.process - empty buffer" {
     const hdr_buf = [_]LinearColor{};
     var out_buf: [0]u8 = undefined;
     const dt = DisplayTransform{ .tone_mapper = .{ .clamp = .{} }, .transform_type = .toSrgb8bit };
-    dt.apply(&hdr_buf, &out_buf);
+    dt.apply(&hdr_buf, &out_buf, null);
 }
 

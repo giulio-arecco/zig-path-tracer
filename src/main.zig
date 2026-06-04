@@ -46,6 +46,14 @@ const u16Max = std.math.maxInt(u16);
 const default_config = AppConfig {};
 const img_out_paths: []const []const u8 = &.{"renders", "output.ppm"};
 const file_path = std.fmt.comptimePrint("{f}", .{std.fs.path.fmtJoin(img_out_paths)});
+const maxSceneIdLen = blk: {
+    var max: usize = 0;
+    for(@typeInfo(SceneId).@"enum".fields) |f| {
+        const len = f.name.len;
+        if (len > max) max = len;
+    }
+    break :blk max;
+};
 
 const help_entries = [_]ArgHelp {
     .{
@@ -61,13 +69,13 @@ const help_entries = [_]ArgHelp {
         .values = &.{ "ProceduralSpheres", "CornellBox", "Quads" }
     },
     .{
-        .name = "--img_height",
+        .name = "--img-height",
         .desc = "Choose the output image height.",
         .default = std.fmt.comptimePrint("{}", .{default_config.user_render_settings.image_height}),
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
     },
     .{
-        .name = "--img_width",
+        .name = "--img-width",
         .desc = "Choose the output image width.",
         .default = std.fmt.comptimePrint("{}", .{default_config.user_render_settings.image_width}),
         .values = &.{ std.fmt.comptimePrint("Any integer between 0 and {}", .{u16Max}) }
@@ -117,18 +125,24 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
     // Parse args
-    var buffer: [16]u8 = undefined;
-    const locked_stderr = try init.io.lockStderr(&buffer, null);
+    const app_config = blk: {
+        var buffer: [32]u8 = undefined;
+        const locked_stderr = try init.io.lockStderr(&buffer, null);
+        defer init.io.unlockStderr();
 
-    var args_it = try init.minimal.args.iterateAllocator(allocator);
+        var args_it = try init.minimal.args.iterateAllocator(allocator);
+        defer args_it.deinit();
 
-    const app_config = try parseArgs(&args_it, locked_stderr.terminal()) orelse return;
+        break :blk try parseArgs(&args_it, locked_stderr.terminal()) orelse return;
+    };
     const render_settings = InternalRenderSettings.compile(app_config.user_render_settings);
-    init.io.unlockStderr();
-    args_it.deinit();
 
     // Setup progress tracking
-    const root_node: ?std.Progress.Node = if (app_config.track_progress) std.Progress.start(init.io, .{ .root_name = "Scene Render" }) else null;
+    const root_name_end = " Scene Render";
+    var buf: [maxSceneIdLen + root_name_end.len]u8 = undefined;
+    const root_name = try std.fmt.bufPrint(&buf, "{t}{s}", .{ app_config.scene_id, root_name_end });
+
+    const root_node = if (app_config.track_progress) std.Progress.start(init.io, .{ .root_name = root_name }) else null;
     defer if (root_node) |n| n.end();
 
     // Create and setup output file and memory map
@@ -164,12 +178,10 @@ pub fn main(init: std.process.Init) !void {
             break :blk .{ .Parallel = .{
                 .io = opt_threaded.?.io(),
                 .settings = render_settings,
-                .progress_root_node = root_node
             } };
         },
         .Serial => .{ .Serial = .{
             .settings = render_settings,
-            .progress_root_node = root_node
         } }
     };
 
@@ -204,6 +216,7 @@ pub fn main(init: std.process.Init) !void {
 
     var ctx = PipelineContext {
         .io = if (opt_threaded) |*t| t.io() else init.io,
+        .progress_node = root_node,
         .renderer = renderer,
         .post_processing_pipeline = .{
             .denoiser = switch (app_config.denoiser_type) {

@@ -62,6 +62,7 @@ pub const PostProcessingPipeline = struct {
 
 pub const PipelineContext = struct {
     io: std.Io,
+    progress_node: ?std.Progress.Node = null,
     renderer: Renderer,
     post_processing_pipeline: PostProcessingPipeline,
     frame_buffers: FrameBuffers,
@@ -160,18 +161,17 @@ pub const Renderer = union(RendererType) {
     Serial: SerialPathTracer,
     Parallel: ParallelPathTracer,
 
-    pub fn render(self: Renderer, scene: *const Scene, buffers: FrameBuffersRenderView) !void {
+    pub fn render(self: Renderer, scene: *const Scene, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) !void {
         switch (self) {
-            inline else => |renderer| return renderer.render(scene, buffers)
+            inline else => |renderer| return renderer.render(scene, buffers, progress_node)
         }
     }
 };
 
 pub const SerialPathTracer = struct {
     settings: InternalRenderSettings,
-    progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: SerialPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView) void {
+    pub fn render(self: SerialPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) void {
         const camera = scene.camera;
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
@@ -179,7 +179,7 @@ pub const SerialPathTracer = struct {
         var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera._pixel_top_left.squaredMagnitude())));
         const random = prng.random();
 
-        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Serial Path Tracer", image_height) else null;
+        const task_node = if (progress_node) |root| root.start("Serial Path Tracer", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
@@ -204,16 +204,15 @@ pub const SerialPathTracer = struct {
 pub const ParallelPathTracer = struct {
     io: std.Io,
     settings: InternalRenderSettings,
-    progress_root_node: ?std.Progress.Node = null,
 
-    pub fn render(self: ParallelPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView) !void {
+    pub fn render(self: ParallelPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) !void {
         const image_width = self.settings.image_width;
         const image_height = self.settings.image_height;
 
         var group: std.Io.Group = .init;
         defer group.cancel(self.io);
 
-        const task_node: ?std.Progress.Node = if (self.progress_root_node) |root| root.start("Parallel Path Tracer", image_height) else null;
+        const task_node = if (progress_node) |root| root.start("Parallel Path Tracer", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
@@ -312,6 +311,8 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     var time_end: std.Io.Timestamp = undefined;
     var duration: i96 = undefined;
 
+    const render_node = if (ctx.progress_node) |root| root.start("Render Step", 0) else null;
+
     print("Render started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
@@ -325,14 +326,17 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
             .depth_buf = ctx.frame_buffers.g_buffers.depth_buf,
             .roughness_buf = ctx.frame_buffers.g_buffers.roughness_buf
         }
-    });
+    }, render_node);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
         duration = time_start.durationTo(time_end).toNanoseconds();
     }
 
+    if (render_node) |n| n.end();
     print("Render completed successfully.\n", .{});
+
+    const post_process_node = if (ctx.progress_node) |root| root.start("Post Process Step", 0) else null;
 
     if (ctx.time_report) {
         print("Render step: {}s, ({}ms).\n", .{
@@ -344,13 +348,14 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Post-process started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    try postProcessStep(ctx.post_processing_pipeline, ctx.io, ctx.scene.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
+    try postProcessStep(ctx.post_processing_pipeline, ctx.io, post_process_node, ctx.scene.camera, ctx.frame_buffers, ctx.image_height, ctx.image_width);
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
         duration = time_start.durationTo(time_end).toNanoseconds();
     }
 
+    if (post_process_node) |n| n.end();
     print("Post-process completed successfully.\n", .{});
 
     if (ctx.time_report) {
@@ -361,39 +366,44 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     }
 }
 
-fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRenderView) !void {
-    return renderer.render(scene, buffers);
+fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) !void {
+    return renderer.render(scene, buffers, progress_node);
 }
 
-fn postProcessStep(pipeline: PostProcessingPipeline, io: std.Io, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) !void {
-    var denoiser_ctx = DenoiserContext {
-        .io = io,
-        .camera = camera,
-        .in_out_buf = frame_buffers.diffuse_buf,
-        .ping_pong_buf = frame_buffers.ping_pong_buf_1,
-        .is_specular = false,
-        .g_buffers = .{
-            .albedo_buf = frame_buffers.g_buffers.albedo_buf,
-            .normal_buf = frame_buffers.g_buffers.normal_buf,
-            .depth_buf = frame_buffers.g_buffers.depth_buf,
-            .roughness_buf = frame_buffers.g_buffers.roughness_buf,
-        },
-        .image_height = image_height,
-        .image_width = image_width
-    };
-
+fn postProcessStep(pipeline: PostProcessingPipeline, io: std.Io, progress_node: ?std.Progress.Node, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) !void {
     if (pipeline.denoiser) |d| {
+        const denoise_node = if (progress_node) |root| root.start("Denoising", 2) else null;
+
+        var denoiser_ctx = DenoiserContext {
+            .io = io,
+            .progress_node = denoise_node,
+            .camera = camera,
+            .in_out_buf = frame_buffers.diffuse_buf,
+            .ping_pong_buf = frame_buffers.ping_pong_buf_1,
+            .is_specular = false,
+            .g_buffers = .{
+                .albedo_buf = frame_buffers.g_buffers.albedo_buf,
+                .normal_buf = frame_buffers.g_buffers.normal_buf,
+                .depth_buf = frame_buffers.g_buffers.depth_buf,
+                .roughness_buf = frame_buffers.g_buffers.roughness_buf,
+            },
+            .image_height = image_height,
+            .image_width = image_width
+        };
+
         try d.apply(denoiser_ctx);
 
         denoiser_ctx.in_out_buf = frame_buffers.specular_buf;
         denoiser_ctx.is_specular = true;
 
         try d.apply(denoiser_ctx);
+
+        if (denoise_node) |n| n.end();
     }
 
-    colorRecomposition(frame_buffers.diffuse_buf, frame_buffers.specular_buf, frame_buffers.emission_buf, frame_buffers.g_buffers.albedo_buf, frame_buffers.ping_pong_buf_1);
+    colorRecomposition(frame_buffers.diffuse_buf, frame_buffers.specular_buf, frame_buffers.emission_buf, frame_buffers.g_buffers.albedo_buf, frame_buffers.ping_pong_buf_1, progress_node);
 
-    pipeline.display_transform.apply(frame_buffers.ping_pong_buf_1, frame_buffers.out_buf);
+    pipeline.display_transform.apply(frame_buffers.ping_pong_buf_1, frame_buffers.out_buf, progress_node);
 }
 
 fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize) SplitIrradiance {

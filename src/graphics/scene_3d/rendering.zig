@@ -104,13 +104,6 @@ pub const InternalRenderSettings = struct {
             .pixel_samples_scale = 1.0 / @as(Float, @floatFromInt(settings.samples_per_pixel))
         };
     }
-
-    pub fn getAspectRatio(self: InternalRenderSettings) f32 {
-        const f_width: f32 = @floatFromInt(self.image_width);
-        const f_height: f32 = @floatFromInt(self.image_height);
-
-        return f_width / f_height;
-    }
 };
 
 pub const SplitIrradiance = struct {
@@ -157,29 +150,41 @@ pub const SplitIrradiance = struct {
     }
 };
 
-pub const Renderer = union(RendererType) {
+pub const RenderContext = struct {
+    io: std.Io,
+    scene: *const Scene,
+    buffers: FrameBuffersRenderView,
+    progress_node: ?std.Progress.Node,
+};
+
+pub const RenderBackend = union(RendererType) {
     Serial: SerialPathTracer,
     Parallel: ParallelPathTracer,
+};
 
-    pub fn render(self: Renderer, scene: *const Scene, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) !void {
-        switch (self) {
-            inline else => |renderer| return renderer.render(scene, buffers, progress_node)
+pub const Renderer = struct {
+    settings: InternalRenderSettings,
+    backend: RenderBackend,
+
+    pub fn render(self: Renderer, ctx: RenderContext) !void {
+        switch (self.backend) {
+            inline else => |impl| return impl.render(self.settings, ctx)
         }
     }
 };
 
 pub const SerialPathTracer = struct {
-    settings: InternalRenderSettings,
+    pub fn render(self: SerialPathTracer, settings: InternalRenderSettings, ctx: RenderContext) void {
+        _ = self;
 
-    pub fn render(self: SerialPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) void {
-        const camera = scene.camera;
-        const image_width = self.settings.image_width;
-        const image_height = self.settings.image_height;
+        const camera = ctx.scene.camera;
+        const image_width = settings.image_width;
+        const image_height = settings.image_height;
 
-        var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera._pixel_top_left.squaredMagnitude())));
+        var prng: std.Random.DefaultPrng = .init(@intFromFloat(@round(camera.pixel_top_left.squaredMagnitude())));
         const random = prng.random();
 
-        const task_node = if (progress_node) |root| root.start("Serial Path Tracer", image_height) else null;
+        const task_node = if (ctx.progress_node) |root| root.start("Serial Path Tracer", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
@@ -187,13 +192,13 @@ pub const SerialPathTracer = struct {
                 const pixel_index = y_screen * image_width + x_screen;
 
                 const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
-                updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, buffers);
+                updateFrameBuffers(ctx.scene, rayToCenter, settings.ray_t_range, pixel_index, ctx.buffers);
 
-                const split_irrad = colorPixel(self.settings, scene, random, x_screen, y_screen);
+                const split_irrad = colorPixel(settings, ctx.scene, random, x_screen, y_screen);
 
-                buffers.diffuse_buf[pixel_index] = split_irrad.diffuse;
-                buffers.specular_buf[pixel_index] = split_irrad.specular;
-                buffers.emission_buf[pixel_index] = split_irrad.emission;
+                ctx.buffers.diffuse_buf[pixel_index] = split_irrad.diffuse;
+                ctx.buffers.specular_buf[pixel_index] = split_irrad.specular;
+                ctx.buffers.emission_buf[pixel_index] = split_irrad.emission;
             }
 
             if (task_node) |n| n.completeOne();
@@ -202,36 +207,38 @@ pub const SerialPathTracer = struct {
 };
 
 pub const ParallelPathTracer = struct {
-    io: std.Io,
-    settings: InternalRenderSettings,
+    pub fn render(self: ParallelPathTracer, settings: InternalRenderSettings, ctx: RenderContext) !void {
+        _ = self;
 
-    pub fn render(self: ParallelPathTracer, scene: *const Scene, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) !void {
-        const image_width = self.settings.image_width;
-        const image_height = self.settings.image_height;
+        const image_width = settings.image_width;
+        const image_height = settings.image_height;
 
         var group: std.Io.Group = .init;
-        defer group.cancel(self.io);
+        defer group.cancel(ctx.io);
 
-        const task_node = if (progress_node) |root| root.start("Parallel Path Tracer", image_height) else null;
+        const task_node = if (ctx.progress_node) |root| root.start("Parallel Path Tracer", image_height) else null;
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
             const start = y_screen * image_width;
             const end = start + image_width;
             const row_buffers = FrameBuffersRenderView {
-                .diffuse_buf = buffers.diffuse_buf[start..end],
-                .specular_buf = buffers.specular_buf[start..end],
-                .emission_buf = buffers.emission_buf[start..end],
+                .diffuse_buf = ctx.buffers.diffuse_buf[start..end],
+                .specular_buf = ctx.buffers.specular_buf[start..end],
+                .emission_buf = ctx.buffers.emission_buf[start..end],
                 .g_buffers = .{
-                    .albedo_buf = buffers.g_buffers.albedo_buf[start..end],
-                    .normal_buf = buffers.g_buffers.normal_buf[start..end],
-                    .depth_buf = buffers.g_buffers.depth_buf[start..end],
-                    .roughness_buf = buffers.g_buffers.roughness_buf[start..end]
+                    .albedo_buf = ctx.buffers.g_buffers.albedo_buf[start..end],
+                    .normal_buf = ctx.buffers.g_buffers.normal_buf[start..end],
+                    .depth_buf = ctx.buffers.g_buffers.depth_buf[start..end],
+                    .roughness_buf = ctx.buffers.g_buffers.roughness_buf[start..end]
                 }
-
             };
 
-            group.concurrent(self.io, renderRow, .{ self, scene, y_screen, row_buffers, task_node }) catch |err| switch (err) {
+            var rowCtx = ctx;
+            rowCtx.buffers = row_buffers;
+            rowCtx.progress_node = task_node;
+
+            group.concurrent(ctx.io, renderRow, .{ y_screen, settings, rowCtx}) catch |err| switch (err) {
                 error.ConcurrencyUnavailable => |e| {
                     std.debug.print("Error: concurrency unavailable\n", .{});
                     return e;
@@ -239,14 +246,14 @@ pub const ParallelPathTracer = struct {
             };
         }
 
-        try group.await(self.io);
+        try group.await(ctx.io);
     }
 
-    fn renderRow(self: ParallelPathTracer, scene: *const Scene, y_screen: usize, row_buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) void {
-        const camera = scene.camera;
-        const image_width = self.settings.image_width;
+    fn renderRow(y_screen: usize, settings: InternalRenderSettings, rowCtx: RenderContext) void {
+        const camera = rowCtx.scene.camera;
+        const image_width = settings.image_width;
 
-        const base_seed: u64 = @intFromFloat(@round(camera._pixel_top_left.squaredMagnitude()));
+        const base_seed: u64 = @intFromFloat(@round(camera.pixel_top_left.squaredMagnitude()));
 
         // Hash the base seed with the row index to guarantee a strong avalanche effect.
         var hasher = std.hash.Wyhash.init(0);
@@ -260,16 +267,16 @@ pub const ParallelPathTracer = struct {
             const pixel_index = x_screen;
 
             const rayToCenter = camera.getRayToCenter(x_screen, y_screen);
-            updateFrameBuffers(scene, rayToCenter, self.settings.ray_t_range, pixel_index, row_buffers);
+            updateFrameBuffers(rowCtx.scene, rayToCenter, settings.ray_t_range, pixel_index, rowCtx.buffers);
 
-            const split_irrad = colorPixel(self.settings, scene, random, x_screen, y_screen);
+            const split_irrad = colorPixel(settings, rowCtx.scene, random, x_screen, y_screen);
 
-            row_buffers.diffuse_buf[pixel_index] = split_irrad.diffuse;
-            row_buffers.specular_buf[pixel_index] = split_irrad.specular;
-            row_buffers.emission_buf[pixel_index] = split_irrad.emission;
+            rowCtx.buffers.diffuse_buf[pixel_index] = split_irrad.diffuse;
+            rowCtx.buffers.specular_buf[pixel_index] = split_irrad.specular;
+            rowCtx.buffers.emission_buf[pixel_index] = split_irrad.emission;
         }
 
-        if (progress_node) |n| n.completeOne();
+        if (rowCtx.progress_node) |n| n.completeOne();
     }
 };
 
@@ -316,17 +323,22 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     print("Render started.\n", .{});
     if (ctx.time_report) time_start = std.Io.Clock.awake.now(ctx.io);
 
-    try renderStep(ctx.scene, ctx.renderer, .{
-        .diffuse_buf = ctx.frame_buffers.diffuse_buf,
-        .specular_buf = ctx.frame_buffers.specular_buf,
-        .emission_buf = ctx.frame_buffers.emission_buf,
-        .g_buffers = .{
-            .albedo_buf = ctx.frame_buffers.g_buffers.albedo_buf,
-            .normal_buf = ctx.frame_buffers.g_buffers.normal_buf,
-            .depth_buf = ctx.frame_buffers.g_buffers.depth_buf,
-            .roughness_buf = ctx.frame_buffers.g_buffers.roughness_buf
-        }
-    }, render_node);
+    try renderStep(ctx.renderer, .{
+        .io = ctx.io,
+        .scene = ctx.scene,
+        .buffers = .{
+            .diffuse_buf = ctx.frame_buffers.diffuse_buf,
+            .specular_buf = ctx.frame_buffers.specular_buf,
+            .emission_buf = ctx.frame_buffers.emission_buf,
+            .g_buffers = .{
+                .albedo_buf = ctx.frame_buffers.g_buffers.albedo_buf,
+                .normal_buf = ctx.frame_buffers.g_buffers.normal_buf,
+                .depth_buf = ctx.frame_buffers.g_buffers.depth_buf,
+                .roughness_buf = ctx.frame_buffers.g_buffers.roughness_buf
+            }
+        },
+        .progress_node = render_node
+    });
 
     if (ctx.time_report) {
         time_end = std.Io.Clock.awake.now(ctx.io);
@@ -366,8 +378,8 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     }
 }
 
-fn renderStep(scene: *const Scene, renderer: Renderer, buffers: FrameBuffersRenderView, progress_node: ?std.Progress.Node) !void {
-    return renderer.render(scene, buffers, progress_node);
+fn renderStep(renderer: Renderer, ctx: RenderContext) !void {
+    return renderer.render(ctx);
 }
 
 fn postProcessStep(pipeline: PostProcessingPipeline, io: std.Io, progress_node: ?std.Progress.Node, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) !void {
@@ -477,15 +489,4 @@ fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, ra
 
     const color_from_emission = hit_record.material.emit() orelse LinearColor.black;
     return color_from_scatter.add(color_from_emission);
-}
-
-test "InternalRenderSettings.getAspectRatio" {
-    const rs1 = InternalRenderSettings.compile(.{ .image_width = 1920, .image_height = 1080, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
-    try std.testing.expectApproxEqAbs(1.7777777, rs1.getAspectRatio(), 0.000001);
-
-    const rs2 = InternalRenderSettings.compile(.{ .image_width = 800, .image_height = 600, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
-    try std.testing.expectApproxEqAbs(1.3333333, rs2.getAspectRatio(), 0.000001);
-
-    const rs3 = InternalRenderSettings.compile(.{ .image_width = 1000, .image_height = 1000, .ray_t_range = .{ .min = 0.0, .max = 100.0 }, .samples_per_pixel = 1, .max_ray_bounces = 10 });
-    try std.testing.expectApproxEqAbs(1.0, rs3.getAspectRatio(), 0.000001);
 }

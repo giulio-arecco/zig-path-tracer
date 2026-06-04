@@ -135,7 +135,7 @@ pub fn main(init: std.process.Init) !void {
 
         break :blk try parseArgs(&args_it, locked_stderr.terminal()) orelse return;
     };
-    const render_settings = InternalRenderSettings.compile(app_config.user_render_settings);
+    const urs = app_config.user_render_settings;
 
     // Setup progress tracking
     const root_name_end = " Scene Render";
@@ -150,10 +150,10 @@ pub fn main(init: std.process.Init) !void {
     const file = try createImgFile(init.io, cwd, file_path);
     defer file.close(init.io);
 
-    const ppm_header_len = fs_utils.computePpmP6HeaderSize(255, render_settings.image_width, render_settings.image_height);
+    const ppm_header_len = fs_utils.computePpmP6HeaderSize(255, urs.image_width, urs.image_height);
     var memory_map = blk: {
-        const height: usize = render_settings.image_height;
-        const width: usize = render_settings.image_width;
+        const height: usize = urs.image_height;
+        const width: usize = urs.image_width;
         const total_size = ppm_header_len + (height * width * 3);
 
         try file.setLength(init.io, total_size);
@@ -165,7 +165,7 @@ pub fn main(init: std.process.Init) !void {
 
     var buf_writer = std.Io.Writer.fixed(memory_map.memory[0..ppm_header_len]);
     const writer = &buf_writer;
-    try fs_utils.writePpmP6Header(writer, 255, render_settings.image_width, render_settings.image_height);
+    try fs_utils.writePpmP6Header(writer, 255, urs.image_width, urs.image_height);
 
     // Choose rendering algorithm
     var opt_threaded: ?std.Io.Threaded = if (!builtin.single_threaded) std.Io.Threaded.init(allocator, .{}) else null;
@@ -175,18 +175,19 @@ pub fn main(init: std.process.Init) !void {
         .Parallel => blk: {
             if (comptime builtin.single_threaded) unreachable;
 
-            break :blk .{ .Parallel = .{
-                .io = opt_threaded.?.io(),
-                .settings = render_settings,
-            } };
+            break :blk .{
+                .settings = InternalRenderSettings.compile(urs),
+                .backend = .{ .Parallel = .{} }
+            };
         },
-        .Serial => .{ .Serial = .{
-            .settings = render_settings,
-        } }
+        .Serial => .{
+            .settings = InternalRenderSettings.compile(urs),
+            .backend = .{ .Serial = .{} }
+        }
     };
 
     // Create the context for the rendering pipeline
-    const image_size = @as(usize, render_settings.image_width) * @as(usize, render_settings.image_height);
+    const image_size = @as(usize, urs.image_width) * @as(usize, urs.image_height);
     const diffuse_buf = try allocator.alloc(LinearColor, image_size);
     defer allocator.free(diffuse_buf);
 
@@ -259,15 +260,14 @@ pub fn main(init: std.process.Init) !void {
         },
         .scene = undefined,
         .time_report = app_config.time_report,
-        .image_height = render_settings.image_height,
-        .image_width = render_settings.image_width
+        .image_height = urs.image_height,
+        .image_width = urs.image_width
     };
 
     // Init the scene and execute the rendering pipeline
     try initAndRenderScene(
         allocator,
         app_config.scene_id,
-        render_settings,
         &ctx
     );
 
@@ -428,11 +428,11 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
     return app_config;
 }
 
-fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, ctx: *PipelineContext) !void {
     switch (scene_id) {
-        .ProceduralSpheres => try initAndRenderSpheresScene(gpa, render_settings, ctx),
-        .CornellBox => try initAndRenderCornellBox(gpa, render_settings, ctx),
-        .Quads => try initAndRenderQuadsScene(gpa, render_settings, ctx),
+        .ProceduralSpheres => try initAndRenderSpheresScene(gpa, ctx),
+        .CornellBox => try initAndRenderCornellBox(gpa, ctx),
+        .Quads => try initAndRenderQuadsScene(gpa, ctx),
     }
 }
 
@@ -487,14 +487,16 @@ fn printHelp(term: std.Io.Terminal) void {
     }
 }
 
-fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderSpheresScene(gpa: std.mem.Allocator, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(13.0, 2.0, 3.0),
         .init(0.0, 0.0, 0.0),
         20.0,
         10.0,
         0.6,
-        render_settings
+        ctx.renderer.settings.image_width,
+        ctx.renderer.settings.image_height,
+        ctx.renderer.settings.recip_sqrt_spp
     );
 
     var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 256);
@@ -584,14 +586,16 @@ fn initAndRenderSpheresScene(gpa: std.mem.Allocator, render_settings: InternalRe
     try executeRenderPipeline(ctx.*);
 }
 
-fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderQuadsScene(gpa: std.mem.Allocator, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(0.0, 0.0, 9.0),
         .init(0.0, 0.0, 0.0),
         80.0,
         10.0,
         0.0,
-        render_settings
+        ctx.renderer.settings.image_width,
+        ctx.renderer.settings.image_height,
+        ctx.renderer.settings.recip_sqrt_spp
     );
 
     var scene = try Scene.initWithCapacity(camera, .init(0.7, 0.8, 1.0), gpa, 5);
@@ -642,14 +646,16 @@ fn initAndRenderQuadsScene(gpa: std.mem.Allocator, render_settings: InternalRend
     try executeRenderPipeline(ctx.*);
 }
 
-fn initAndRenderCornellBox(gpa: std.mem.Allocator, render_settings: InternalRenderSettings, ctx: *PipelineContext) !void {
+fn initAndRenderCornellBox(gpa: std.mem.Allocator, ctx: *PipelineContext) !void {
     const camera = Camera.initLookAt(
         .init(278.0, 278.0, -800.0),
         .init(278.0, 278.0, 0.0),
         40.0,
         10.0,
         0.0,
-        render_settings
+        ctx.renderer.settings.image_width,
+        ctx.renderer.settings.image_height,
+        ctx.renderer.settings.recip_sqrt_spp
     );
 
     var scene = try Scene.initWithCapacity(camera, LinearColor.black, gpa, 8);

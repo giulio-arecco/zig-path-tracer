@@ -35,6 +35,7 @@ const createImgFile = fs_utils.createImgFile;
 const assertAnytypeHasDecls = type_utils.assertAnytypeHasDecls;
 const executeRenderPipeline = rendering.executeRenderPipeline;
 
+/// Meta-information about a supported CLI argument to standardize formatted `--help` output.
 const ArgHelp = struct {
     name: []const u8,
     desc: []const u8,
@@ -151,6 +152,9 @@ pub fn main(init: std.process.Init) !void {
     defer file.close(init.io);
 
     const ppm_header_len = fs_utils.computePpmP6HeaderSize(255, urs.image_width, urs.image_height);
+
+    // Explicitly sizes the file, then establishes a direct OS-level memory mapping
+    // accommodating the header and RGB pixel data to circumvent buffered disk writes.
     var memory_map = blk: {
         const height: usize = urs.image_height;
         const width: usize = urs.image_width;
@@ -428,6 +432,7 @@ fn parseArgs(args_it: anytype, term: std.Io.Terminal) !?AppConfig {
     return app_config;
 }
 
+/// Routes the selected scene identifier to its hardcoded creation subroutine.
 fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, ctx: *PipelineContext) !void {
     switch (scene_id) {
         .ProceduralSpheres => try initAndRenderSpheresScene(gpa, ctx),
@@ -436,6 +441,7 @@ fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, ctx: *PipelineC
     }
 }
 
+/// Prints formatted, colorized text to the terminal, displaying valid command-line flags.
 fn printHelp(term: std.Io.Terminal) void {
     const w = term.writer;
 

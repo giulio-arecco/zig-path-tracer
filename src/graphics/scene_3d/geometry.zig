@@ -1,3 +1,9 @@
+//! Defines 3D mathematical geometry primitives and data structures.
+//! Includes shapes as well as spatial acceleration structures like BVH, and transform decorators.
+//!
+//! Primitives store a pointer to their material, requiring the scene or an external owner
+//! to manage the material lifecycles, as the geometry layer executes hit tests without owning shading data.
+
 const std = @import("std");
 const config = @import("../../global_config.zig");
 const math_utils = @import("../../math_utils.zig");
@@ -16,18 +22,25 @@ const dot = Vec3.dot;
 const cross = Vec3.cross;
 const evaluateDiscriminantReduced = math_utils.evaluateDiscriminantReduced;
 
+/// Represents the primary coordinate axes in 3D space.
 pub const Axis = enum { x, y, z };
 pub const RotatedX = Rotate(.x);
 pub const RotatedY = Rotate(.y);
 pub const RotatedZ = Rotate(.z);
 
+/// A mathematical sphere.
+/// Represents a perfectly round geometrical object in 3D space defined by a single center point and a radius.
 pub const Sphere = struct {
     center: Vec3,
     radius: Float,
-    /// Pointer to the `Sphere` material.\
-    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid lifetime issues.
+    /// Pointer to the `Sphere` material.
+    ///
+    /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level (e.g. by the `Scene`) to avoid lifetime issues.
+    ///
+    /// Treat as **immutable** and externally owned.
     material: *const Material,
 
+    /// Creates a new sphere primitive with a given center, radius, and a non-owned material pointer.
     pub fn init(center: Vec3, radius: Float, mat: *const Material) Sphere {
         return .{
             .center = center,
@@ -36,8 +49,11 @@ pub const Sphere = struct {
         };
     }
 
+    /// Checks if a ray intersects this sphere within the given parameter range.
+    /// Uses the quadratic formula to solve the implicit sphere equation against the ray's parametric form.
+    /// Updates `hit_record` with intersection details and returns `true` upon a valid hit.
     pub fn hit(self: Sphere, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
-        // Intersection between a ray and a sphere (implicit eq: (x - x_c)^2 + (y - y_c)^2 + (z - z_c)^2 = r^2, parametric eq: (P - C)^2 - r^2 = 0)\
+        // Intersection between a ray and a sphere (implicit eq: (x - x_c)^2 + (y - y_c)^2 + (z - z_c)^2 = r^2, parametric eq: (P - C)^2 - r^2 = 0)
         const eye_to_center = self.center.sub(ray.origin);
 
         // To find the t parameter we must solve a second-grade linear equation with the following coefficients:
@@ -77,37 +93,39 @@ pub const Sphere = struct {
         return true;
     }
 
+    /// Computes the Axis-Aligned Bounding Box (AABB) tightly enclosing the sphere.
+    /// This is used heavily for spatial partitioning and fast BVH creation.
     pub fn bbox(self: Sphere) Aabb {
         const radius_vec = Vec3.init(self.radius, self.radius, self.radius);
         return Aabb.initFromPoints(self.center.sub(radius_vec), self.center.add(radius_vec));
     }
 };
 
+/// An arbitrary 3D quadrilateral defined by a starting corner and two edge vectors.
 pub const Quad = struct {
-    /// The quad starting corner.\
-    /// Treat as **immutable**
+    /// The quad starting corner. Treat as **immutable**
     q: Vec3,
-    /// The quad first side. Q + u gives one of the two corners adjecent to Q.\
-    /// Treat as **immutable**.
+    /// The quad first side. Q + u gives one of the two corners adjecent to Q. Treat as **immutable**.
     u: Vec3,
-    /// The quad second side. Q + v gives one of the two corners adjecent to Q.\
-    /// Treat as **immutable**.
+    /// The quad second side. Q + v gives one of the two corners adjecent to Q. Treat as **immutable**.
     v: Vec3,
     /// A constant vector for the given quad, useful for constructing a *coordinate frame* for the plane
-    /// containing the quad to find the ray-quad intersection point planar coordinates.\
-    /// It's equal to **n** / (**n** ⋅ **n**), where **n** is the quad normal vector (before normalization).\
+    /// containing the quad to find the ray-quad intersection point planar coordinates.
+    /// It's equal to **n** / (**n** ⋅ **n**), where **n** is the quad normal vector (before normalization).
+    ///
     /// Treat as **immutable**.
     w: Vec3,
-    /// The quad unit normal vector, computed as the cross product between u and v (u x v).\
-    /// Treat as **immutable**.
+    /// The quad unit normal vector, computed as the cross product between u and v (u x v). Treat as **immutable**.
     normal: Vec3,
-    /// The `D` term in the implicit formula for the plane containing the quad: Ax + By + Cz + D = 0.\
-    /// Treat as **immutable**.
+    /// The `D` term in the implicit formula for the plane containing the quad: Ax + By + Cz + D = 0. Treat as **immutable**.
     d: Float,
-    /// Pointer to the `Quad` material.\
+    /// Pointer to the `Quad` material.
     /// Since the memory referenced by this pointer can be shared by many primitives, it's not owned by any of them. Instead, it should always be managed at a higher level to avoid lifetime issues.
+    ///
+    /// Treat as **immutable** and externally owned.
     material: *const Material,
 
+    /// Initializes a Quad by computing internal planar constants (`n`, `normal`, `d`, `w`) up-front to heavily optimize ray-quad intersection tests during rendering.
     pub fn init(q: Vec3, u: Vec3, v: Vec3, mat: *const Material) Quad {
         const n = cross(u, v);
         const normal = n.normalized();
@@ -125,6 +143,8 @@ pub const Quad = struct {
         };
     }
 
+    /// Checks if a ray intersects the quadrilateral.
+    /// Finds the intersection with the plane holding the quad, then checks if the hit point falls within the 2D boundaries determined by `w`.
     pub fn hit(self: Quad, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         const denom = dot(self.normal, ray.dir);
         if (@abs(denom) < std.math.floatEps(Float)) {
@@ -141,6 +161,9 @@ pub const Quad = struct {
         const point = ray.at(t);
 
         const planar_hit_vec = point.sub(self.q);
+
+        // Calculate the hit point's planar coordinates (alpha, beta) using the inverse basis vectors.
+        // A valid hit requires both coordinates to be in [0, 1], guaranteeing the point falls inside the quad's bounds.
         const alpha = dot(self.w, cross(planar_hit_vec, self.v));
         const beta = dot(self.w, cross(self.u, planar_hit_vec));
         const unit_interval = IntervalFloat {.min = 0.0, .max = 1.0 };
@@ -161,6 +184,7 @@ pub const Quad = struct {
         return true;
     }
 
+    /// Creates a bounding box encompassing the entire quad by merging bounding boxes constructed from opposite corner pairs.
     pub fn bbox(self: Quad) Aabb {
         const box0 = Aabb.initFromPoints(self.q, self.q.add(self.u).add(self.v));
         const box1 = Aabb.initFromPoints(self.q.add(self.u), self.q.add(self.v));
@@ -168,11 +192,13 @@ pub const Quad = struct {
     }
 };
 
+/// A 3D box formed by six planar faces.
 pub const Box = struct {
     /// The box faces.
     faces: [6]Quad,
 
-    /// Initialize a 3D box (six sides) that contains the two opposite vertices a and b
+    /// Initializes a 3D box containing the opposite vertices `a` and `b`.
+    /// Constructs 6 Quads spanning the bounded volume.
     pub fn init(a: Vec3, b: Vec3, mat: *const Material) Box {
         const min = Vec3.init(@min(a.x, b.x), @min(a.y, b.y), @min(a.z, b.z));
         const max = Vec3.init(@max(a.x, b.x), @max(a.y, b.y), @max(a.z, b.z));
@@ -194,14 +220,16 @@ pub const Box = struct {
         };
     }
 
-    /// Allocates and returns a pointer to a 3D box that contains the two opposite vertices a and b.\
-    /// The passed allocator should always be the same that's cached in the Scene struct at initialization and later used for deinit.
+    /// Allocates and returns a pointer to a 3D box containing the two opposite vertices a and b.
+    /// The passed allocator should align with the Scene's lifecycle allocation strategy, ensuring memory is freed using the exact corresponding deinit sequence.
     pub fn alloc(a: Vec3, b: Vec3, mat: *const Material, scene_allocator: Allocator) Allocator.Error!*Box {
         const box_ptr = try scene_allocator.create(Box);
         box_ptr.* = Box.init(a, b, mat);
         return box_ptr;
     }
 
+    /// Verifies ray intersection by delegating testing to each of the 6 constituent Quads.
+    /// Uses closest-hit logic by continually shrinking `current_t_range.max`.
     pub fn hit(self: Box, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         var current_t_range = ray_t_range;
         var hit_anything = false;
@@ -216,6 +244,7 @@ pub const Box = struct {
         return hit_anything;
     }
 
+    /// Computes the bounding box of the entire Box by structurally accumulating the bounding boxes of its contained Quads.
     pub fn bbox(self: Box) Aabb {
         var aabb = Aabb.initMergeTwo(self.faces[0].bbox(), self.faces[1].bbox());
         inline for(2..self.faces.len) |i| {
@@ -225,11 +254,16 @@ pub const Box = struct {
     }
 };
 
+/// Translates an underlying `Hittable`.
+/// Uses inverse transformations to test intersections in object space.
 pub const Translated = struct {
-    /// The `Translated` struct owns the memory referenced by this pointer.
+    /// The `Translated` struct owns the memory referenced by this pointer, requiring cleanup.
     object: *Hittable,
     offset: Vec3,
 
+    /// Wraps a hittable object and translates it. Allocates memory for the nested element.
+    ///
+    /// The passed allocator should align with the Scene's lifecycle allocation strategy, ensuring memory is freed using the exact corresponding deinit sequence.
     pub fn init(object: Hittable, offset: Vec3, scene_allocator: Allocator) Allocator.Error!Translated {
         const obj_ptr = try scene_allocator.create(Hittable);
         obj_ptr.* = object;
@@ -240,14 +274,15 @@ pub const Translated = struct {
         };
     }
 
-    /// Frees heap allocated memory for a `Translated` struct.\
-    /// The passed allocator should always be the same that's cached in the `Scene` struct at initialization.
+    /// Frees heap allocated memory for the nested `Hittable`.
+    /// The passed allocator must match the one used during initial creation.
     pub fn deinit(self: *Translated, scene_allocator: Allocator) void {
         self.object.deinit(scene_allocator);
         scene_allocator.destroy(self.object);
         self.* = undefined;
     }
 
+    /// Shifts the ray inversely by the block's translation, performing local object-space hit-testing, then adjusts the collision point forward.
     pub fn hit(self: Translated, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         // Move the ray backwards by the offset
         const offset_ray = Ray { .origin = ray.origin.sub(self.offset), .dir = ray.dir };
@@ -262,6 +297,7 @@ pub const Translated = struct {
         return true;
     }
 
+    /// Fetches the inner object's BBox, returning a translated version shifted by `offset`.
     pub fn bbox(self: Translated) Aabb {
         const obj_bbox = self.object.bbox();
         return .{
@@ -272,15 +308,20 @@ pub const Translated = struct {
     }
 };
 
+/// Rotates an underlying `Hittable`.
+/// Transforms rays into the local non-rotated coordinate system, tests intersections, and re-rotates outputs back into world space.
 pub fn Rotate(comptime axis: Axis) type {
     return struct {
         const Self = @This();
 
-        /// The `Rotate` struct owns the memory referenced by this pointer.
+        /// The `Rotate` struct owns the memory referenced by this pointer, requiring cleanup.
         object: *Hittable,
         sin_theta: Float,
         cos_theta: Float,
 
+        /// Initializes the `Rotation` struct and allocates the wrapped object's memory.
+        ///
+        /// The passed allocator should align with the Scene's lifecycle allocation strategy, ensuring memory is freed using the exact corresponding deinit sequence.
         pub fn init(object: Hittable, degrees: Float, scene_allocator: Allocator) Allocator.Error!Self {
             const radians: Float = std.math.degreesToRadians(degrees);
 
@@ -294,8 +335,8 @@ pub fn Rotate(comptime axis: Axis) type {
             };
         }
 
-        /// Frees heap allocated memory for a `Rotate` struct.\
-        /// The passed allocator should always be the same that's cached in the `Scene` struct at initialization.
+        /// Frees heap allocated memory for the nested `Hittable`.
+        /// The passed allocator must match the one used during initial creation.
         pub fn deinit(self: *Self, scene_allocator: Allocator) void {
             self.object.deinit(scene_allocator);
             scene_allocator.destroy(self.object);
@@ -380,30 +421,34 @@ pub fn Rotate(comptime axis: Axis) type {
     };
 }
 
+/// A generic intersection abstraction grouping different geometrical primitives and structures.
 pub const Hittable = union(enum) {
     sphere: Sphere,
     quad: Quad,
-    /// Box, owned by the Hittable union.
+    /// Box, owned by the `Hittable` union.
     box: *const Box,
     translated: Translated,
     rotated_x: RotatedX,
     rotated_y: RotatedY,
     rotated_z: RotatedZ,
 
+    /// Dispatches hit-testing algorithms to the specific wrapped variant.
     pub fn hit(self: Hittable, ray: Ray, ray_t_range: IntervalFloat, hit_record: *HitRecord) bool {
         switch (self) {
             inline else => |hittable| return hittable.hit(ray, ray_t_range, hit_record)
         }
     }
 
+    /// Dispatches bbox computation algorithms to the specific wrapped variant.
     pub fn bbox(self: Hittable) Aabb {
         switch (self) {
             inline else => |hittable| return hittable.bbox()
         }
     }
 
-    /// Frees heap allocated memory for a `Hittable` union.\
-    /// The passed allocator should always be the same that's cached in the `Scene` struct at initialization.
+    /// Frees dynamically allocated memory for a `Hittable` union.
+    ///
+    /// The passed allocator should align with the Scene's lifecycle allocation strategy, ensuring memory is freed using the exact corresponding deinit sequence.
     pub fn deinit(self: *Hittable, scene_allocator: Allocator) void {
         switch(self.*) {
             .box => |b| scene_allocator.destroy(b),
@@ -443,17 +488,18 @@ pub const Hittable = union(enum) {
     }
 };
 
+/// Contains informations regarding ray-geometry intersections.
 pub const HitRecord = struct {
     t: Float,
     point: Vec3,
     normal: Vec3,
-    /// The HitRecord struct never owns the memory referenced by this pointer.
+    /// The `HitRecord` struct doesn't own the memory referenced by this pointer. Cleanup must be managed upstream.
     material: *const Material,
     front_face: bool,
 
     /// Determines a normal vector orientation. The resulting normal will always point against the ray.
     ///
-    /// The first tuple field indicates whether the ray hit the outside of the surface (front face, `true`) or the inside of the surface (back face, `false`).\
+    /// The first field in the returned tuple indicates whether the ray hit the outside of the surface (front face, `true`) or the inside of the surface (back face, `false`).
     /// The second tuple field contains the oriented normal.
     ///
     /// **NOTE**: The parameter `outward_normal` is assumed to be normalized.
@@ -467,17 +513,16 @@ pub const HitRecord = struct {
     }
 };
 
+/// A 3-dimensional axis-aligned bounding box.
 pub const Aabb = struct {
-    /// The axis-aligned bounding box x interval.\
-    /// Treat as **immutable**.
+    /// The axis-aligned bounding box x interval. Treat as **immutable**.
     x: IntervalFloat,
-    /// The axis-aligned bounding box y interval.\
-    /// Treat as **immutable**.
+    /// The axis-aligned bounding box y interval. Treat as **immutable**.
     y: IntervalFloat,
-    /// The axis-aligned bounding box z interval.\
-    /// Treat as **immutable**.
+    /// The axis-aligned bounding box z interval. Treat as **immutable**.
     z: IntervalFloat,
 
+    /// Computes the minimal fitting box encompassing a range between two corners.
     pub fn initFromPoints(a: Vec3, b: Vec3) Aabb {
         var box = Aabb {
             .x = if (a.x <= b.x) .{ .min = a.x, .max = b.x } else .{ .min = b.x, .max = a.x },
@@ -524,6 +569,8 @@ pub const Aabb = struct {
             const ray_dir_coord = @field(ray.dir, field.name);
             const ray_dir_coord_inv = 1.0 / ray_dir_coord;
 
+            // Slab method: Calculates the intersection t-values entering and exiting
+            // the two parallel planes defining the bounding box for this axis.
             var t0 = (axis_interval.min - ray_orig_coord) * ray_dir_coord_inv;
             var t1 = (axis_interval.max - ray_orig_coord) * ray_dir_coord_inv;
 
@@ -570,6 +617,8 @@ pub const Aabb = struct {
     }
 };
 
+/// An accelerated spatial partitioning data structure (Bounding Volume Hierarchy).
+/// Optimizes intersection logic by spatially sorting geometries.
 pub const BvhTree = struct {
     nodes: std.ArrayList(BvhNode),
 
@@ -577,13 +626,15 @@ pub const BvhTree = struct {
     /// We avoid this to grant a size of 32 bytes (2 for the `BvhNode` `u32` fields, 6 for the `Aabb` `Interval(f32)` fields) for better performance.
     /// Of course, this is only true if the `Float` type declared in global_config.zig is `f32`.
     pub const BvhNode = struct {
-        /// The number of primitives in this node. It's 0 if the node is internal, > 0 if it's a leaf.\
+        /// The number of primitives in this node. It's 0 if the node is internal, > 0 if it's a leaf.
+        ///
         /// Treat as **immutable**.
         primitive_count: u32,
-        /// If the node is a leaf, this field stores the index of the first primitive in the `BvhTree` list, otherwise it stores the index of its right child.\
+        /// If the node is a leaf, this field stores the index of the first primitive in the `BvhTree` list, otherwise it stores the index of its right child.
+        ///
         /// Treat as **immutable**.
         first_or_right_index: u32,
-        /// The BVH node axis-aligned bounding box.\
+        /// The BVH node axis-aligned bounding box.
         /// Treat as **immutable**.
         bbox: Aabb,
     };
@@ -744,6 +795,9 @@ pub const BvhTree = struct {
         // Splitting along the longest axis is a continuous computational shortcut to roughly minimize the surface area
         // of child nodes, which statistically bounds and reduces the probability of a random ray intersecting them.
         const axis = bbox.longest_axis();
+
+        // Sort geometries along the determined longest axis so we can partition them into two
+        // geometrically contiguous halves, creating two child bounding boxes.
         std.mem.sortUnstable(usize, indices, SortContext{ .axis = axis, .hittables = hittables }, lessThanIndicesBBox);
 
         const mid = range_len / 2;

@@ -1,3 +1,5 @@
+//! Platform-agnostic file system wrappers ensuring predictable I/O execution, isolated from OS specifics.
+
 const std = @import("std");
 const type_utils = @import("type_utils.zig");
 
@@ -20,10 +22,12 @@ fn computePathStrLen(comptime path_components: []const []const u8) usize {
     return len;
 }
 
+/// Evaluates the total byte length a given format configuration will demand when flushed to the header section of a PPM P6 output block .
 pub fn computePpmP6HeaderSize(max_size: u16, img_width: usize, img_height: usize) usize {
     return std.fmt.count("P6\n{d} {d}\n{d}\n", .{ img_width, img_height, max_size });
 }
 
+/// Writes standard PPM P6 header bytes.
 pub fn writePpmP6Header(writer: anytype, max_size: u16, img_width: usize, img_height: usize) !void {
     assertAnytypeHasDecls(writer, &.{ "print", "flush" });
 
@@ -31,12 +35,12 @@ pub fn writePpmP6Header(writer: anytype, max_size: u16, img_width: usize, img_he
     try writer.flush();
 }
 
-// ==========================================================================================================================
-// The "createImgFile" and "createFileWithSuffix" functions receive the sub_path slice as a comptime argument as they aren't
-// used in an interactive scenario. This allows us to determine the length of "buf" in the "createFileWithSuffix" function at
-// compile time, thereby avoiding the need to allocate it dinamically or oversize it.
-// ==========================================================================================================================
+// The "createImgFile" and "createFileWithSuffix" functions receive `sub_path` as a comptime slice to enable static bounds
+// tracking on formatted strings, resolving internal buffers capacities at compile-time and circumventing a dynamic heap allocator pipeline entirely.
 
+/// Creates an image file on disk.
+/// Checks for naming collisions and auto-appends numerical increments to prevent overwriting existing files.
+/// Returns a file handle in exclusive write ownership mode to the caller.
 pub fn createImgFile(io: std.Io, dir: std.Io.Dir, comptime sub_path: []const u8) !std.Io.File {
     if (sub_path.len == 0) @compileError("sub_path cannot be empty");
 
@@ -47,6 +51,8 @@ pub fn createImgFile(io: std.Io, dir: std.Io.Dir, comptime sub_path: []const u8)
     };
 }
 
+/// Resolves sequential directory hierarchies on demand before placing the leaf file.
+/// Assumes the caller has exhaustively stripped invalid path tokens on their end.
 fn createDirAndFile(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) !std.Io.File {
     std.debug.assert(sub_path.len > 0);
 
@@ -58,6 +64,8 @@ fn createDirAndFile(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) !std.Io.F
     return error.BadPathName;
 }
 
+/// Determines the maximum integer suffix currently on disk for the leaf file name and creates a file using the next available suffix.
+/// Allocates bounding buffer capacities strictly using comptime variables.
 fn createFileWithSuffix(io: std.Io, dir: std.Io.Dir, comptime sub_path: []const u8) !std.Io.File {
     if (sub_path.len == 0) @compileError("sub_path cannot be empty");
 

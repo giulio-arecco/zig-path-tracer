@@ -1,3 +1,8 @@
+//! A Scene represents the entire virtual world to be rendered.
+//!
+//! The `Scene` struct owns and manages the lifecycle of dynamically created
+//! materials and geometries, using an internal allocator.
+//! This ownership model makes it easy to clean up all resources after rendering.
 const Scene = @This();
 
 const std = @import("std");
@@ -21,7 +26,7 @@ const Hittable = geometry.Hittable;
 
 /// The scene main camera.
 camera: Camera,
-/// The collection of all hittable objects in the scene.\
+/// The collection of all hittable objects in the scene.
 /// Treat as **immutable**.
 hittables: ArrayList(Hittable),
 /// Owned list of pointers to heap-allocated `Material` instances.
@@ -37,13 +42,16 @@ hittables: ArrayList(Hittable),
 materials: ArrayList(*const Material),
 /// The scene background color.
 bg_color: LinearColor,
-/// The scene bounding volume hierarchy, initialized as `null` and built on request from the current primitives list.\
+/// The scene bounding volume hierarchy, initialized as `null` and built on request from the current primitives list.
 /// Treat as **immutable**.
 bvh: ?BvhTree,
-/// The scene underlying allocator, used to dynamically update the scene content.\
+/// The scene underlying allocator, used to dynamically update the scene content.
 /// Treat as **immutable**.
 allocator: Allocator,
 
+/// Evaluates ray intersections against the scene's geometry, returning whether
+/// a hit occurred and populating the `HitRecord` with the closest intersection data.
+/// Uses spatial subdivision (BVH) for accelerated traversal if available.
 pub fn hit(self: *const Scene, ray: Ray, ray_t_range: Interval, hit_record: *HitRecord) bool {
     // Use the BVH if available
     if (self.bvh) |*bvh| {
@@ -64,6 +72,9 @@ pub fn hit(self: *const Scene, ray: Ray, ray_t_range: Interval, hit_record: *Hit
     return hit_anything;
 }
 
+/// Begins the scene lifecycle workflow, initializing an empty scene. No memory
+/// is allocated upfront. The scene will use the provided allocator to manage
+/// and own subsequent additions to internal, dynamically allocated collections.
 pub fn init(camera: Camera, bg_color: LinearColor, allocator: Allocator) Scene {
     return .{
         .camera = camera,
@@ -75,6 +86,8 @@ pub fn init(camera: Camera, bg_color: LinearColor, allocator: Allocator) Scene {
     };
 }
 
+/// Pre-allocates space for scene primitives to avoid reallocations during setup.
+/// Fails if the underlying allocator cannot provide the requested capacity.
 pub fn initWithCapacity(camera: Camera, bg_color: LinearColor, allocator: Allocator, capacity: usize) Allocator.Error!Scene {
     return .{
         .camera = camera,
@@ -86,6 +99,7 @@ pub fn initWithCapacity(camera: Camera, bg_color: LinearColor, allocator: Alloca
     };
 }
 
+/// Ends the scene lifecycle workflow. Releases all resources owned by the scene, ensuring a clean memory state.
 pub fn deinit(self: *Scene) void {
     if (self.bvh) |*bvh| {
         bvh.deinit(self.allocator);
@@ -104,7 +118,9 @@ pub fn deinit(self: *Scene) void {
     self.* = undefined;
 }
 
-/// Invalidates the current scene active BVH (if present). It must be rebuilt if needed.
+/// Modifies the scene by inserting a new geometric primitive.
+/// This populates the world during the setup phase of the lifecycle workflow.
+/// Modifying the geometry invalidates the active BVH (if present), so it must be rebuilt.
 pub fn add(self: *Scene, surface: Hittable) Allocator.Error!void {
     if (self.bvh) |*bvh| {
         bvh.deinit(self.allocator);
@@ -114,6 +130,8 @@ pub fn add(self: *Scene, surface: Hittable) Allocator.Error!void {
     try self.hittables.append(self.allocator, surface);
 }
 
+/// Allocates and registers a new material in the scene, returning a pointer
+/// for geometries to reference. The scene owns the material and determines its lifespan, ensuring correct cleanup.
 pub fn createMaterial(self: *Scene, mat: Material) Allocator.Error!*const Material {
     const mat_ptr = try self.allocator.create(Material);
     mat_ptr.* = mat;
@@ -122,6 +140,8 @@ pub fn createMaterial(self: *Scene, mat: Material) Allocator.Error!*const Materi
     return mat_ptr;
 }
 
+/// Constructs a Bounding Volume Hierarchy from the current primitive list.
+/// This must be called before rendering to construct the spatial hierarchy, replacing O(N) ray intersections with O(log N) traversal.
 pub fn buildBvh(self: *Scene, min_node_size: usize) Allocator.Error!void {
     if (self.bvh) |*bvh| {
         bvh.deinit(self.allocator);

@@ -1,3 +1,5 @@
+//! Represents a 3D ray with an origin and direction.
+
 const Ray = @This();
 
 const std = @import("std");
@@ -13,9 +15,13 @@ const Interval = math_utils.Interval(Float);
 
 const normalizeFloat = math_utils.normalizeFloat;
 
+/// The starting point of the ray in 3D space.
 origin: Vec3,
+/// The direction the ray travels in. This does not strictly need to be normalized.
 dir: Vec3,
 
+/// Calculates the 3D position along the ray at a given distance parameter `t`.
+/// This implements the parametric line equation: `P(t) = origin + t * dir`.
 pub fn at(self: Ray, t: Float) Vec3 {
     return self.origin.add(self.dir.scalarMul(t));
 }

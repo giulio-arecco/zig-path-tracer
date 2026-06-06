@@ -1,3 +1,5 @@
+//! Defines the material models used for rendering and how they interact with light.
+
 const std = @import("std");
 
 const LinearColor = @import("../LinearColor.zig");
@@ -8,12 +10,16 @@ const Float = @import("../../global_config.zig").Float;
 
 const dot = Vec3.dot;
 
+/// A polymorphic dispatch type encompassing all distinct material models available.
 pub const Material = union(enum) {
     lambertian: Lambertian,
     metal: Metal,
     dielectric: Dielectric,
     diffuse_light: DiffuseLight,
 
+    /// Computes how a material scatters an incoming ray.
+    /// Returns an `Optional` containing the scattered ray and attenuation.
+    /// Light sources, which absorb rays entirely, return `null`.
     pub fn scatter(self: Material, ray: Ray, hit: HitRecord, rand: std.Random) ?ScatterResult {
         return switch (self) {
             .diffuse_light => null,
@@ -21,6 +27,8 @@ pub const Material = union(enum) {
         };
     }
 
+    /// Returns the color data emitted directly by the material.
+    /// Non-emissive materials return null, while light sources return their emission color.
     pub fn emit(self: Material) ?LinearColor {
         return switch(self) {
             .diffuse_light => |light| light.emit(),
@@ -40,18 +48,25 @@ pub const Material = union(enum) {
 
 pub const ScatterType = enum { diffuse, specular };
 
+/// Represents the result of a ray scattering off a surface.
+/// Contains the newly scattered ray direction and the attenuation color factor
+/// that indicates how much light is absorbed during the bounce.
 pub const ScatterResult = struct {
     scattered_ray: Ray,
     scatter_type: ScatterType,
     attenuation: LinearColor,
 };
 
+/// Simulates a matte material.
+/// It models light by creating diffuse reflection, scattering incoming rays
+/// in random directions across the hemisphere defined by the surface normal.
 pub const Lambertian = struct {
     albedo: LinearColor,
 
     pub fn scatter(self: Lambertian, ray: Ray, hit: HitRecord, rand: std.Random) ScatterResult {
         _ = ray;
 
+        // Ideal Lambertian reflection
         const tmp = hit.normal.add(Vec3.randomNormalized(rand));
         const scatter_dir = if (tmp.isNearZero()) hit.normal else tmp;
 
@@ -65,6 +80,9 @@ pub const Lambertian = struct {
     }
 };
 
+/// Simulates a shiny or metallic surface.
+/// It models light through pure specular reflection by mirroring the incoming ray
+/// against the surface normal, optionally perturbing the result to simulate fuzzy reflections.
 pub const Metal = struct {
     albedo: LinearColor,
     /// The fuzziness factor must be in range `[0.0, 1.0]`
@@ -86,6 +104,10 @@ pub const Metal = struct {
     }
 };
 
+/// Simulates clear materials such as water or glass.
+/// It models light by using Snell's law to compute refraction and reflection
+/// directions based on the material's index of refraction, probabilistically choosing
+/// between them based on the viewing angle.
 pub const Dielectric = struct {
     /// Refractive index in vacuum or air, or the ratio of the material's refractive index over
     /// the refractive index of the enclosing media
@@ -126,12 +148,17 @@ pub const Dielectric = struct {
 
     /// This function uses Schlick's approximation for reflectance.
     fn reflectance(cosine: Float, refractive_index: Float) Float {
+        // Approximates Fresnel equations representing how reflection increases at grazing angles,
+        // dynamically shifting probability between reflection and refraction based on the view angle.
         const r0 = (1.0 - refractive_index) / (1.0 + refractive_index);
         const r0_sq = r0 * r0;
         return r0_sq + (1 - r0_sq) * std.math.pow(Float, (1.0 - cosine), 5.0);
     }
 };
 
+/// Simulates a light-emitting surface.
+/// It models light by directly emitting color values when hit by a ray.
+/// Incoming rays are fully absorbed and not scattered.
 pub const DiffuseLight = struct {
     color: LinearColor,
 

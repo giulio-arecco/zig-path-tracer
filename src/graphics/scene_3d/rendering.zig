@@ -1,3 +1,5 @@
+//! This file contains the core rendering logic.
+
 const std = @import("std");
 const config = @import("../../global_config.zig");
 const geometry = @import("geometry.zig");
@@ -22,22 +24,27 @@ const print = std.debug.print;
 const colorRecomposition = post_processing.colorRecomposition;
 const getRecompositionAlbedo = post_processing.getRecompositionAlbedo;
 
+/// Defines the execution strategy for the rendering pipeline.
 pub const RendererType = enum { Serial, Parallel };
 
+/// Stores intermediate surface features (albedo, normals, depth, roughness) for each pixel
+/// to be used later by post-processing algorithms.
 pub const GBuffers = struct {
     albedo_buf: []LinearColor,
     normal_buf: []Vec3,
     depth_buf: []Float,
-    roughness_buf: []Float
+    roughness_buf: []Float,
 };
 
+/// A read-only counterpart to `GBuffers`, ensuring no mutation occurs when used as inputs.
 pub const GBuffersReadOnly = struct {
     albedo_buf: []const LinearColor,
     normal_buf: []const Vec3,
     depth_buf: []const Float,
-    roughness_buf: []const Float
+    roughness_buf: []const Float,
 };
 
+/// Container for all image-sized buffers spanning the pipeline.
 pub const FrameBuffers = struct {
     diffuse_buf: []LinearColor,
     specular_buf: []LinearColor,
@@ -48,6 +55,7 @@ pub const FrameBuffers = struct {
     out_buf: []u8
 };
 
+/// A restricted view of the frame buffers mapping only the channels required during the core rendering loop.
 pub const FrameBuffersRenderView = struct {
     diffuse_buf: []LinearColor,
     specular_buf: []LinearColor,
@@ -55,11 +63,14 @@ pub const FrameBuffersRenderView = struct {
     g_buffers: GBuffers
 };
 
+/// Defines the sequence of optional and mandatory image operations applied after the primary rendering pass finishes.
 pub const PostProcessingPipeline = struct {
     denoiser: ?Denoiser = null,
     display_transform: DisplayTransform,
 };
 
+/// The unified context capturing all shared resources and state needed
+/// to coordinate a complete render and post-process cycle.
 pub const PipelineContext = struct {
     io: std.Io,
     progress_node: ?std.Progress.Node = null,
@@ -72,6 +83,7 @@ pub const PipelineContext = struct {
     time_report: bool = false,
 };
 
+/// High-level configuration meant to be safely and interactively adjusted by the end-user.
 pub const UserRenderSettings = struct {
     image_width: u16 = 600,
     image_height: u16 = 600,
@@ -80,6 +92,7 @@ pub const UserRenderSettings = struct {
     samples_per_pixel: u16 = 200,
 };
 
+/// Internal compiled variant of `UserRenderSettings` that provides constants pre-computation to avoid repetitive math during rendering.
 pub const InternalRenderSettings = struct {
     image_width: u16,
     image_height: u16,
@@ -106,6 +119,9 @@ pub const InternalRenderSettings = struct {
     }
 };
 
+/// Tracks color components split by material interaction type.
+/// Separating these components preserves high-frequency details (e.g. sharp reflections)
+/// from being blurred improperly alongside soft lighting during denoising.
 pub const SplitIrradiance = struct {
     diffuse: LinearColor,
     specular: LinearColor,
@@ -150,6 +166,7 @@ pub const SplitIrradiance = struct {
     }
 };
 
+/// Context encapsulating state needed for rendering.
 pub const RenderContext = struct {
     io: std.Io,
     scene: *const Scene,
@@ -157,11 +174,13 @@ pub const RenderContext = struct {
     progress_node: ?std.Progress.Node,
 };
 
+/// A union that represent the specific rendering strategy.
 pub const RenderBackend = union(RendererType) {
     Serial: SerialPathTracer,
     Parallel: ParallelPathTracer,
 };
 
+/// Coordinates rendering by coupling active settings with the chosen execution strategy.
 pub const Renderer = struct {
     settings: InternalRenderSettings,
     backend: RenderBackend,
@@ -173,6 +192,8 @@ pub const Renderer = struct {
     }
 };
 
+/// Renders the scene sequentially inside a single thread, accumulating pixel colors
+/// progressively row-by-row.
 pub const SerialPathTracer = struct {
     pub fn render(self: SerialPathTracer, settings: InternalRenderSettings, ctx: RenderContext) void {
         _ = self;
@@ -206,6 +227,7 @@ pub const SerialPathTracer = struct {
     }
 };
 
+/// Implements the multi-threading model by batching work across scanlines and dispatching these batches to worker threads to parallelize the core rendering loop.
 pub const ParallelPathTracer = struct {
     pub fn render(self: ParallelPathTracer, settings: InternalRenderSettings, ctx: RenderContext) !void {
         _ = self;
@@ -220,6 +242,8 @@ pub const ParallelPathTracer = struct {
         defer if (task_node) |n| n.end();
 
         for (0..image_height) |y_screen| {
+            // Split the rendering workload into horizontal slices (scanlines), and dispatch them
+            // to a worker pool queue. Each task works on an independent pixel buffer slice.
             const start = y_screen * image_width;
             const end = start + image_width;
             const row_buffers = FrameBuffersRenderView {
@@ -249,6 +273,7 @@ pub const ParallelPathTracer = struct {
         try group.await(ctx.io);
     }
 
+    /// Dispatches a single scanline execution task to a worker thread.
     fn renderRow(y_screen: usize, settings: InternalRenderSettings, rowCtx: RenderContext) void {
         const camera = rowCtx.scene.camera;
         const image_width = settings.image_width;
@@ -280,6 +305,7 @@ pub const ParallelPathTracer = struct {
     }
 };
 
+/// Populates the G-buffer arrays based on the first ray intersection.
 fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, index: usize, buffers: FrameBuffersRenderView) void {
     var hit_record: HitRecord = undefined;
     const hit = scene.hit(ray, ray_t_range, &hit_record);
@@ -300,6 +326,9 @@ fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, inde
     buffers.g_buffers.roughness_buf[index] = hit_record.material.getRoughness();
 }
 
+/// The top-level orchestrator of the image synthesis logic.
+/// Asserts buffer constraints, triggers the rendering routine and the
+/// subsequent post-processing routines, while logging optional metrics.
 pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     const buf_len = ctx.frame_buffers.diffuse_buf.len;
     std.debug.assert(ctx.frame_buffers.specular_buf.len == buf_len);
@@ -378,10 +407,12 @@ pub fn executeRenderPipeline(ctx: PipelineContext) !void {
     }
 }
 
+/// Executes the configured rendering strategy. Used internally by pipeline execution.
 fn renderStep(renderer: Renderer, ctx: RenderContext) !void {
     return renderer.render(ctx);
 }
 
+/// Applies sequential post-processing transformations before outputting the final 8-bit image.
 fn postProcessStep(pipeline: PostProcessingPipeline, io: std.Io, progress_node: ?std.Progress.Node, camera: Camera, frame_buffers: FrameBuffers, image_height: u16, image_width: u16,) !void {
     if (pipeline.denoiser) |d| {
         const denoise_node = if (progress_node) |root| root.start("Denoising", 2) else null;
@@ -418,6 +449,7 @@ fn postProcessStep(pipeline: PostProcessingPipeline, io: std.Io, progress_node: 
     pipeline.display_transform.apply(frame_buffers.ping_pong_buf_1, frame_buffers.out_buf, progress_node);
 }
 
+/// Computes the final accumulated color for a single pixel through multi-sampling.
 fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std.Random, x_screen: usize, y_screen: usize) SplitIrradiance {
     const camera = scene.camera;
     const pixel_samples_scale = settings.pixel_samples_scale;
@@ -444,6 +476,7 @@ fn colorPixel(settings: InternalRenderSettings, scene: *const Scene, random: std
     return pixel_split_irrad;
 }
 
+/// Traces the initial camera ray into the scene, independently storing diffuse, specular, and emissive light components based on the first hit.
 fn tracePrimaryRay(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) SplitIrradiance {
     if (depth == 0) {
         return SplitIrradiance.allBlack;
@@ -471,6 +504,7 @@ fn tracePrimaryRay(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: 
     return result;
 }
 
+/// Recursively traces and bounces a ray through the scene until it hits a light, hits the background, or exceeds the depth bound.
 fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, rand: std.Random) LinearColor {
     if (depth == 0) {
         return LinearColor.black;
@@ -482,6 +516,8 @@ fn rayColor(ray: Ray, scene: *const Scene, ray_t_range: Interval, depth: u16, ra
     if (!hit) return scene.bg_color;
 
     const scatterRes = hit_record.material.scatter(ray, hit_record, rand);
+
+    // Accumulate the light from the successive bounces multiplied by the surface attenuation and add the emitted light from the current hit material.
     const color_from_scatter = if (scatterRes) |res|
         rayColor(res.scattered_ray, scene, ray_t_range, depth - 1, rand).mul(res.attenuation)
     else

@@ -1,3 +1,5 @@
+//! The core 3D vector primitive.
+
 const Vec3 = @This();
 
 const std = @import("std");
@@ -10,10 +12,13 @@ x: Float,
 y: Float,
 z: Float,
 
+/// A vector with all components set to 1.0.
 pub const ones = Vec3 { .x = 1.0, .y = 1.0, .z = 1.0 };
 
+/// The zero vector (0, 0, 0).
 pub const zeroes = Vec3 { .x = 0.0, .y = 0.0, .z = 0.0 };
 
+/// Initializes a new 3D vector given explicit coordinates.
 pub fn init(x: Float, y: Float, z: Float) Vec3 {
     return .{ .x = x, .y = y, .z = z };
 }
@@ -22,14 +27,17 @@ pub fn dot(a: Vec3, b: Vec3) Float {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+/// Since it doesn't rely on square root calculations, this should be preferred over `magnitude` when the goal is to compare lengths.
 pub fn squaredMagnitude(self: Vec3) Float {
     return dot(self, self);
 }
 
+/// Retrieves the exact Euclidean length of the vector.
 pub fn magnitude(self: Vec3) Float {
     return @sqrt(dot(self, self));
 }
 
+/// Checks if the vector approximates a unit length of 1.0.
 pub fn isNormalized(v: Vec3) bool {
     if (math_utils.approxEq(Float, squaredMagnitude(v), 1.0))
         return true;
@@ -37,6 +45,7 @@ pub fn isNormalized(v: Vec3) bool {
     return false;
 }
 
+/// Creates a properly scaled vector of length 1 pointing in the original direction.
 pub fn normalized(v: Vec3) Vec3 {
     const magnSq = v.squaredMagnitude();
     std.debug.assert(magnSq > std.math.floatMin(Float));
@@ -45,6 +54,7 @@ pub fn normalized(v: Vec3) Vec3 {
     return v.scalarDiv(@sqrt(magnSq));
 }
 
+/// Computes the cross product of two vectors, which outputs a vector strictly perpendicular to the input vectors.
 pub fn cross(a: Vec3, b: Vec3) Vec3 {
     return .{
         .x =  a.y * b.z - a.z * b.y,
@@ -53,6 +63,7 @@ pub fn cross(a: Vec3, b: Vec3) Vec3 {
     };
 }
 
+/// Performs vector addition by adding individual components of the input vectors.
 pub fn add(a: Vec3, b: Vec3) Vec3 {
     return .{
         .x = a.x + b.x,
@@ -61,7 +72,7 @@ pub fn add(a: Vec3, b: Vec3) Vec3 {
     };
 }
 
-/// Returns a - b
+/// Performs vector subtraction by subtracting individual components of the input vectors.
 pub fn sub(a: Vec3, b: Vec3) Vec3 {
     return .{
         .x = a.x - b.x,
@@ -70,10 +81,12 @@ pub fn sub(a: Vec3, b: Vec3) Vec3 {
     };
 }
 
+/// Since it doesn't rely on square root calculations, this should be preferred over `distance` when the goal is to compare distances.
 pub fn squaredDistance(a: Vec3, b: Vec3) Float {
     return squaredMagnitude(a.sub(b));
 }
 
+/// Provides the absolute Euclidean distance from vector `a` to vector `b`.
 pub fn distance(a: Vec3, b: Vec3) Float {
     return magnitude(a.sub(b));
 }
@@ -86,6 +99,7 @@ pub fn isApproxEq(self: Vec3, other: Vec3) bool {
     return x_equal and y_equal and z_equal;
 }
 
+/// Multiplies the vector uniformly stretching or compressing it across all dimensions by `t`.
 pub fn scalarMul(v: Vec3, t: Float) Vec3 {
     return .{
         .x = v.x * t,
@@ -94,6 +108,7 @@ pub fn scalarMul(v: Vec3, t: Float) Vec3 {
     };
 }
 
+/// Inverts the vector direction over the origin.
 pub fn negated(v: Vec3) Vec3 {
     return .{
         .x = -v.x,
@@ -102,6 +117,7 @@ pub fn negated(v: Vec3) Vec3 {
     };
 }
 
+/// Divides the vector uniformly compressing or stretching it across all dimensions by `t`.
 pub fn scalarDiv (v: Vec3, t: Float) Vec3 {
     std.debug.assert(t != 0.0);
 
@@ -112,6 +128,7 @@ pub fn scalarDiv (v: Vec3, t: Float) Vec3 {
     };
 }
 
+/// Returns a random vector bounded within [0.0, 1.0] along its axes.
 pub fn random(rand: std.Random) Vec3 {
     return .{
         .x = rand.float(Float),
@@ -120,6 +137,7 @@ pub fn random(rand: std.Random) Vec3 {
     };
 }
 
+/// Generates a random vector with all components bounded within designated min and max bounds.
 pub fn randomInRange(rand: std.Random, min: Float, max: Float) Vec3 {
     return .{
         .x = rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0}, .{ .min = min, .max = max }),
@@ -128,7 +146,11 @@ pub fn randomInRange(rand: std.Random, min: Float, max: Float) Vec3 {
     };
 }
 
+/// Returns a true Lambertian random directional unit vector strictly mapped to the surface of a unit sphere.
+/// This randomly scattered direction correctly models physics for matte diffusive materials.
 pub fn randomNormalized(rand: std.Random) Vec3 {
+    // Employs Monte Carlo rejection sampling: randomly generates vectors bounded within a [-1, 1] cube,
+    // explicitly rejecting combinations falling outside the embedded unit sphere before normalizing.
     while (true) {
         const p = randomInRange(rand, -1.0, 1.0);
         const magnSq = p.squaredMagnitude();
@@ -139,6 +161,7 @@ pub fn randomNormalized(rand: std.Random) Vec3 {
     }
 }
 
+/// Returns a random vector entirely inside an ideal flat unit disk (z = 0).
 pub fn randomInUnitDisk(rand: std.Random) Vec3 {
     while (true) {
         const p = Vec3 {
@@ -153,6 +176,7 @@ pub fn randomInUnitDisk(rand: std.Random) Vec3 {
     }
 }
 
+/// Generates a valid directional vector strictly resting in the outgoing hemisphere around a provided surface normal.
 pub fn randomOnHemisphere(rand: std.Random, normal: Vec3) Vec3 {
     const rand_unit = randomNormalized(rand);
     if (dot(rand_unit, normal) > 0.0) {
@@ -172,7 +196,7 @@ pub fn reflect(v: Vec3, axis: Vec3) Vec3 {
     return v.add(axis.scalarMul(- 2.0 * dot(v, axis) / axis.squaredMagnitude()));
 }
 
-/// Asserts that `unit` is normalized.
+/// Casts a perfectly mirrored reflection. Asserts that `unit` is normalized.
 pub fn reflectOnUnit(v: Vec3, unit: Vec3) Vec3 {
     std.debug.assert(unit.isNormalized());
 
@@ -180,7 +204,8 @@ pub fn reflectOnUnit(v: Vec3, unit: Vec3) Vec3 {
     return v.add(unit.scalarMul(- 2.0 * proj));
 }
 
-/// Asserts that `v` and `n` are normalized.
+/// Bends light following Snell's law.
+/// Asserts that both the incident ray `unit_v` and the surface normal separator `n` are normalized.
 pub fn refract(unit_v: Vec3, n: Vec3, etai_over_etat: Float) Vec3 {
     std.debug.assert(unit_v.isNormalized());
     std.debug.assert(n.isNormalized());

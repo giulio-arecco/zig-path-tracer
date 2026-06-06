@@ -1,3 +1,5 @@
+//! Represents an 8-bit RGB color.
+
 const Color = @This();
 
 const std = @import("std");
@@ -14,15 +16,18 @@ r: u8,
 g: u8,
 b: u8,
 
+/// Converts the color down to a packed 24-bit integer, useful for fast memory writes.
 pub inline fn toPacked(self: Color) u24 {
     return (@as(u24, self.r) << 16) | (@as(u24, self.g) << 8) | @as(u24, self.b);
 }
 
+/// Defines a linear transition between two colors.
 pub const Gradient = struct {
     start_color: Color,
     end_color: Color,
     t_range: Interval = .{ .min = 0.0, .max = 1.0 },
 
+    /// Calculates the interpolated `Color` at the given progress t.
     pub fn at(self: Gradient, t: Float) Color {
         std.debug.assert(self.t_range.contains(t));
 
@@ -41,6 +46,7 @@ pub const Gradient = struct {
         };
     }
 
+    /// Evaluates the gradient and packs the resulting color directly to a 24-bit integer.
     pub fn atPacked(self: Gradient, t: Float) u24 {
         const color = self.at(t);
         return color.toPacked();

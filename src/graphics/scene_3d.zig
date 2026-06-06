@@ -1,3 +1,6 @@
+//! Module exporting the spatial components making up scene geometries, camera representations,
+//! materials behavior and global rendering pipelines. Forms the main public API of the 3D graphics system.
+
 pub const Scene = @import("scene_3d/Scene.zig");
 pub const Camera = @import("scene_3d/Camera.zig");
 pub const Ray = @import("scene_3d/Ray.zig");

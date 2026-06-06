@@ -1,3 +1,5 @@
+//! Graphics module aggregating all rendering, 3D scene, and color components.
+
 pub const scene_3d = @import("graphics/scene_3d.zig");
 pub const post_processing = @import("graphics/post_processing.zig");
 pub const Color = @import("graphics/Color.zig");

@@ -1,3 +1,5 @@
+//! This module handles the final stages of the graphics pipeline before output and writes the final 8-bit colors.
+
 const std = @import("std");
 const config = @import("../global_config.zig");
 const math_utils = @import("../math_utils.zig");
@@ -33,6 +35,7 @@ pub const ToneMapper = union(enum) {
 };
 
 pub const ReinhardToneMapper = struct {
+    /// Desaturates the HDR radiance toward white bounds based on absolute limits.
     pub fn apply(self: ReinhardToneMapper, c: LinearColor) LinearColor {
         _ = self;
         const ones: @Vector(3, Float) = @splat(1.0);
@@ -43,6 +46,7 @@ pub const ReinhardToneMapper = struct {
 pub const ExtendedReinhardToneMapper = struct {
     white: Float,
 
+    /// Scales the HDR radiance while capping values exceeding the configured peak white thresholds.
     pub fn apply(self: ExtendedReinhardToneMapper, c: LinearColor) LinearColor {
         std.debug.assert(self.white > 0.0);
 
@@ -52,7 +56,9 @@ pub const ExtendedReinhardToneMapper = struct {
     }
 };
 
+/// The simplest possible HDR to LDR conversion, slicing off values extending beyond the standard upper bound limit.
 pub const ClampToneMapper = struct {
+    /// Ceils any HDR colors above maximum white. Results in prominent loss of detail in highly emissive paths.
     pub fn apply(self: ClampToneMapper, c: LinearColor) LinearColor {
         _ = self;
         const ones: @Vector(3, Float) = @splat(1.0);
@@ -63,6 +69,7 @@ pub const ClampToneMapper = struct {
 pub const ExpToneMapper = struct {
     exposure: Float,
 
+    /// Distributes brightness across a logarithmic curve dictated by the base exposure level.
     pub fn apply(self: ExpToneMapper, c: LinearColor) LinearColor {
         const ones: @Vector(3, Float) = @splat(1.0);
         const exp_vec: @Vector(3, Float) = @splat(self.exposure);
@@ -89,6 +96,7 @@ pub const GammaCompressionToneMapper = struct {
     }
 };
 
+/// Core payload structure encapsulating rendering outputs required to execute the denoise pass.
 pub const DenoiserContext = struct {
     io: std.Io,
     progress_node: ?std.Progress.Node = null,
@@ -101,6 +109,7 @@ pub const DenoiserContext = struct {
     image_height: u16,
 };
 
+/// The top-level denoiser interface.
 pub const Denoiser = union(enum) {
     joint_bilateral_denoiser: JointBilateralDenoiser,
     atrous_denoiser: ATrousDenoiser,
@@ -112,6 +121,9 @@ pub const Denoiser = union(enum) {
     }
 };
 
+/// A denoising filter that smooths colors across surrounding pixels (using a spatial kernel)
+/// while actively preserving geometry edges by weighting contributions based on spatial distance,
+/// luma differences, surface depth, and normal similarity.
 pub const JointBilateralDenoiser = struct {
     kernel_size: u8,
     sigma_space: Float,
@@ -272,6 +284,9 @@ pub const JointBilateralDenoiser = struct {
                         break :blk @abs(Vec3.dot(v_diff, center_normal));
                     };
 
+                    // Calculate continuous, exponential edge-stopping weights.
+                    // This prevents blurring across significant depth boundaries, normal discontinuities (corners),
+                    // or stark differences in lighting (luma), preserving geometric and lighting sharpness.
                     const w_space = @exp(-sq_dist * inv_two_sigma_space_sq);
                     const w_normal = @exp(-(normals_delta * normals_delta) * inv_two_sigma_normal_sq);
                     const w_depth = @exp(-(plane_dist * plane_dist) * inv_two_sigma_depth_sq);
@@ -292,6 +307,8 @@ pub const JointBilateralDenoiser = struct {
     }
 };
 
+/// A multi-pass wavelet-based denoiser applying increasingly wide spatial filters while preserving edges,
+/// highly efficient for resolving low-frequency global illumination noise.
 pub const ATrousDenoiser = struct {
     diffuse_iterations: u8,
     specular_iterations: u8,
@@ -487,6 +504,10 @@ pub const ATrousDenoiser = struct {
     }
 };
 
+/// Applies tone mapping and gamma correction to the image. Tone mapping compresses
+/// high dynamic range (HDR) values of internally-used `LinearColor` into a limited,
+/// displayable low dynamic range. Gamma correction then matches the non-linear
+/// response properties of digital displays. The final output is `Color`.
 pub const DisplayTransform = struct {
     tone_mapper: ToneMapper,
     transform_type: DisplayTransformType,
@@ -610,6 +631,7 @@ pub const DisplayTransform = struct {
     }
 };
 
+/// Recombines various separated irradiance components (diffuse, specular, emission, albedo) into the final HDR color representation.
 pub fn colorRecomposition(diffuse_buf: []const LinearColor, specular_buf: []const LinearColor, emission_buf: []const LinearColor, albedo_buf: []const LinearColor, out_buf: []LinearColor, progress_node: ?std.Progress.Node) void {
     const task_node = if (progress_node) |root| root.start("Recomposition", out_buf.len) else null;
     defer if (task_node) |n| n.end();
@@ -620,6 +642,7 @@ pub fn colorRecomposition(diffuse_buf: []const LinearColor, specular_buf: []cons
     }
 }
 
+/// Extracts the base, un-illuminated color (albedo) of a material.
 pub fn getRecompositionAlbedo(mat: *const Material) LinearColor {
     switch (mat.*) {
         inline .lambertian, .metal => |m| return m.albedo,
@@ -627,6 +650,7 @@ pub fn getRecompositionAlbedo(mat: *const Material) LinearColor {
     }
 }
 
+/// Calculates the perceived brightness of a linear color based on the standard biological luminance coefficients.
 pub fn luminanceSrgb(c: LinearColor) Float {
     return 0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b();
 }

@@ -1,3 +1,10 @@
+//! High Dynamic Range (HDR) Linear Color Representation.
+//!
+//! Uses floating-point values to represent unbounded light energy in a scene.
+//! Unlike standard 8-bit RGB (where values are clamped to [0, 255] or [0.0, 1.0] and gamma-corrected),
+//! linear colors accurately accumulate and scale radiant energy during physically-based rendering without
+//! loss of precision or premature clipping.
+
 const LinearColor = @This();
 
 const std = @import("std");
@@ -21,11 +28,13 @@ pub const black = LinearColor { .v = @splat(0.0) };
 /// Initialize a pure white LinearColor (1, 1, 1)
 pub const white = LinearColor { .v = @splat(1.0) };
 
+/// Represents a smooth linear transition between two linear colors.
 pub const LinearGradient = struct {
     start_color: LinearColor,
     end_color: LinearColor,
     t_range: Interval = .{ .min = 0.0, .max = 1.0 },
 
+    /// Calculates the interpolated `LinearColor` value at the given progression t.
     pub fn at(self: LinearGradient, t: Float) LinearColor {
         std.debug.assert(self.t_range.contains(t));
 
@@ -41,18 +50,22 @@ pub fn init(red: Float, green: Float, blue: Float) LinearColor {
     return .{ .v = .{ red, green, blue } };
 }
 
+/// Retrieves the raw red intensity component.
 pub fn r(self: LinearColor) Float {
     return self.v[0];
 }
 
+/// Retrieves the raw green intensity component.
 pub fn g(self: LinearColor) Float {
     return self.v[1];
 }
 
+/// Retrieves the raw blue intensity component.
 pub fn b(self: LinearColor) Float {
     return self.v[2];
 }
 
+/// Ensures the color vector does not contain corrupted values like NaN or negative energy.
 pub fn isValid(self: LinearColor) bool {
     const is_valid = @reduce(.And, self.v >= @as(@Vector(3, Float), @splat(0.0))) and
                      !std.math.isNan(self.v[0]) and !std.math.isNan(self.v[1]) and !std.math.isNan(self.v[2]) and

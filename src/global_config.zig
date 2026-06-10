@@ -8,7 +8,7 @@ const RendererType = @import("graphics/scene_3d/rendering.zig").RendererType;
 pub const Float = f32;
 
 /// Identifiers for the pre-defined scenes available for rendering.
-pub const SceneId = enum { ProceduralSpheres, CornellBox, Quads };
+pub const SceneId = enum { ProceduralSpheres, CornellBox, Quads, Final };
 
 /// Available denoising algorithms that can be applied during post-processing.
 pub const DenoiserType = enum { None, JointBilateral, ATrous  };

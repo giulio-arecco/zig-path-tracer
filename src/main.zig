@@ -67,7 +67,7 @@ const help_entries = [_]ArgHelp {
         .name = "--scene",
         .desc = "Choose the scene to render.",
         .default = std.fmt.comptimePrint("{t}", .{default_config.scene_id}),
-        .values = &.{ "ProceduralSpheres", "CornellBox", "Quads" }
+        .values = &.{ "ProceduralSpheres", "CornellBox", "Quads", "Final" }
     },
     .{
         .name = "--img-height",
@@ -438,6 +438,7 @@ fn initAndRenderScene(gpa: std.mem.Allocator, scene_id: SceneId, ctx: *PipelineC
         .ProceduralSpheres => try initAndRenderSpheresScene(gpa, ctx),
         .CornellBox => try initAndRenderCornellBox(gpa, ctx),
         .Quads => try initAndRenderQuadsScene(gpa, ctx),
+        .Final => try initAndRenderFinalScene(gpa, ctx)
     }
 }
 
@@ -692,6 +693,101 @@ fn initAndRenderCornellBox(gpa: std.mem.Allocator, ctx: *PipelineContext) !void 
     try scene.add(sphere);
 
     try scene.buildBvh(1);
+
+    ctx.scene = &scene;
+    try executeRenderPipeline(ctx.*);
+}
+
+fn initAndRenderFinalScene(gpa: std.mem.Allocator, ctx: *PipelineContext) !void {
+    const camera = Camera.initLookAt(
+        .init(478.0, 278.0, -600.0),
+        .init(278.0, 278.0, 0.0),
+        40.0,
+        632.0,
+        0.0,
+        ctx.renderer.settings.image_width,
+        ctx.renderer.settings.image_height,
+        ctx.renderer.settings.recip_sqrt_spp
+    );
+
+    var scene = Scene.init(camera, LinearColor.black, gpa);
+    defer scene.deinit();
+
+    var prng: std.Random.DefaultPrng = .init(121);
+    const rand = prng.random();
+
+    // Materials
+    const ground = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.48, 0.83, 0.53) } });
+    const light = try scene.createMaterial(.{ .diffuse_light = .{ .color = .init(9.0, 9.0, 9.0) } });
+    const white = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.73, 0.73, 0.73) } });
+    const wall_lambertian = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.05, 0.05, 0.05) } });
+    const sphere_lambertian = try scene.createMaterial(.{ .lambertian = .{ .albedo = .init(0.7, 0.3, 0.1) } });
+    const sphere_glass = try scene.createMaterial(.{ .dielectric = .{ .refractive_index = 1.5 } });
+    const sphere_fuzzy_metal = try scene.createMaterial(.{ .metal = .{ .albedo = .init(0.8, 0.8, 0.9), .fuzz = 1.0 } });
+    const sphere_glossy_metal = try scene.createMaterial(.{ .metal = .{ .albedo = .init(0.1, 0.1, 1.0), .fuzz = 0.0 } });
+
+    // Primitives
+    const boxes_per_side: usize = 20;
+    for (0..boxes_per_side) |i| {
+        for(0..boxes_per_side) |j| {
+            const w: Float = 100.0;
+            const x0 = -1000.0 + @as(Float, @floatFromInt(i)) * w;
+            const z0 = -1000.0 + @as(Float, @floatFromInt(j)) * w;
+            const y0: Float = 0.0;
+            const x1 = x0 + w;
+            const y1 = math_utils.rescaleFloat(Float, rand.float(Float), .{ .min = 0.0, .max = 1.0 }, .{ .min = 1.0, .max = 101.0 });
+            const z1 = z0 + w;
+
+            try scene.add(try Hittable.createBox(.init(x0, y0, z0), .init(x1, y1, z1), ground, gpa));
+        }
+    }
+
+    const base: Float = 1900.0;
+    const height: Float = 550.0;
+    const quad_size: Float = 50.0;
+    const xz_quads = @as(usize, @intFromFloat(base / quad_size));
+    const y_quads = @as(usize, @intFromFloat(height / quad_size));
+    // Back
+    for (0..xz_quads) |i| {
+        for (0..y_quads) |j| {
+            try scene.add(Hittable.createQuad(
+                .init(900.0 - quad_size * @as(Float, @floatFromInt(i)), quad_size * @as(Float, @floatFromInt(j)), 900.0),
+                .init(-quad_size, 0.0, 0.0), .init(0.0, quad_size, 0.0),
+                wall_lambertian)
+            );
+        }
+    }
+    // Top
+    for (0..xz_quads) |i| {
+        for (0..xz_quads) |j| {
+            try scene.add(Hittable.createQuad(
+                .init(900.0 - quad_size * @as(Float, @floatFromInt(i)), height, 900.0 - quad_size * @as(Float, @floatFromInt(j))),
+                .init(-quad_size, 0.0, 0.0), .init(0.0, 0.0, -quad_size),
+                wall_lambertian)
+            );
+        }
+    }
+
+    // try scene.add(Hittable.createQuad(.init(900.0, 0.0, 900.0), .init(-1900.0, 0.0, 0.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //back
+    // try scene.add(Hittable.createQuad(.init(-1000.0, 0.0, 900.0), .init(0.0, 0.0, -1900.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //right
+    // try scene.add(Hittable.createQuad(.init(900.0, 555.0, 900.0), .init(-1900.0, 0.0, 0.0), .init(0.0, 0.0, -1900.0), wall_lambertian)); //top
+    // try scene.add(Hittable.createQuad(.init(900.0, 0.0, -1000.0), .init(0.0, 0.0, 1900.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //left
+    // try scene.add(Hittable.createQuad(.init(-1000.0, 0.0, -1000.0), .init(1900.0, 0.0, 0.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //front
+    try scene.add(Hittable.createQuad(.init(123.0, 549.0, 147.0), .init(300.0, 0.0, 0.0), .init(0.0, 0.0, 265.0), light));
+    try scene.add(Hittable.createSphere(.init(400.0, 400.0, 200.0), 50.0, sphere_lambertian));
+    try scene.add(Hittable.createSphere(.init(260.0, 150.0, 45.0), 50.0, sphere_glass));
+    try scene.add(Hittable.createSphere(.init(375.0, 230.0, 175.0), 75.0, sphere_glossy_metal));
+    try scene.add(Hittable.createSphere(.init(0.0, 150.0, 145.0), 50.0, sphere_fuzzy_metal));
+
+    const ns: usize = 1000;
+    for (0..ns) |_| {
+        var sphere = Hittable.createSphere(.randomInRange(rand, 0.0, 165.0), 10.0, white);
+        sphere = try sphere.rotateY(15.0, gpa);
+        sphere = try sphere.translate(.init(-100.0, 270.0, 395.0), gpa);
+        try scene.add(sphere);
+    }
+
+    try scene.buildBvh(4);
 
     ctx.scene = &scene;
     try executeRenderPipeline(ctx.*);

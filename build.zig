@@ -15,7 +15,14 @@ pub fn build(b: *std.Build) void {
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
-    const optimize = b.standardOptimizeOption(.{});
+    // const optimize = b.standardOptimizeOption(.{
+    //     .preferred_optimize_mode = .ReleaseFast
+    // });
+    const optimize = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Prioritize performance, safety, or binary size"
+    ) orelse .ReleaseFast;
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -28,7 +35,7 @@ pub fn build(b: *std.Build) void {
     // to our consumers. We must give it a name because a Zig package can expose
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
-    // const mod = b.addModule("zig-pathtracer", .{
+    // const mod = b.addModule("zig_path_tracer", .{
     //     // The root source file is the "entry point" of this module. Users of
     //     // this module will only be able to access public declarations contained
     //     // in this file, which means that if you have declarations that you
@@ -58,7 +65,7 @@ pub fn build(b: *std.Build) void {
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
     const exe = b.addExecutable(.{
-        .name = "zig-pathtracer",
+        .name = "zig_path_tracer",
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -73,12 +80,12 @@ pub fn build(b: *std.Build) void {
             // List of modules available for import in source files part of the
             // root module.
             // .imports = &.{
-            //     // Here "zig-pathtracer" is the name you will use in your source code to
-            //     // import this module (e.g. `@import("zig-pathtracer")`). The name is
+            //     // Here "zig_path_tracer" is the name you will use in your source code to
+            //     // import this module (e.g. `@import("zig_path_tracer")`). The name is
             //     // repeated because you are allowed to rename your imports, which
             //     // can be extremely useful in case of collisions (which can happen
             //     // importing modules from different packages).
-            //     .{ .name = "zig-pathtracer", .module = mod },
+            //     .{ .name = "zig_path_tracer", .module = mod },
             // },
         })
     });

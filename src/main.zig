@@ -747,7 +747,8 @@ fn initAndRenderFinalScene(gpa: std.mem.Allocator, ctx: *PipelineContext) !void 
     const quad_size: Float = 50.0;
     const xz_quads = @as(usize, @intFromFloat(base / quad_size));
     const y_quads = @as(usize, @intFromFloat(height / quad_size));
-    // Back
+
+    // Back wall
     for (0..xz_quads) |i| {
         for (0..y_quads) |j| {
             try scene.add(Hittable.createQuad(
@@ -757,7 +758,8 @@ fn initAndRenderFinalScene(gpa: std.mem.Allocator, ctx: *PipelineContext) !void 
             );
         }
     }
-    // Top
+
+    // Top wall
     for (0..xz_quads) |i| {
         for (0..xz_quads) |j| {
             try scene.add(Hittable.createQuad(
@@ -768,11 +770,6 @@ fn initAndRenderFinalScene(gpa: std.mem.Allocator, ctx: *PipelineContext) !void 
         }
     }
 
-    // try scene.add(Hittable.createQuad(.init(900.0, 0.0, 900.0), .init(-1900.0, 0.0, 0.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //back
-    // try scene.add(Hittable.createQuad(.init(-1000.0, 0.0, 900.0), .init(0.0, 0.0, -1900.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //right
-    // try scene.add(Hittable.createQuad(.init(900.0, 555.0, 900.0), .init(-1900.0, 0.0, 0.0), .init(0.0, 0.0, -1900.0), wall_lambertian)); //top
-    // try scene.add(Hittable.createQuad(.init(900.0, 0.0, -1000.0), .init(0.0, 0.0, 1900.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //left
-    // try scene.add(Hittable.createQuad(.init(-1000.0, 0.0, -1000.0), .init(1900.0, 0.0, 0.0), .init(0.0, 555.0, 0.0), wall_lambertian)); //front
     try scene.add(Hittable.createQuad(.init(123.0, 549.0, 147.0), .init(300.0, 0.0, 0.0), .init(0.0, 0.0, 265.0), light));
     try scene.add(Hittable.createSphere(.init(400.0, 400.0, 200.0), 50.0, sphere_lambertian));
     try scene.add(Hittable.createSphere(.init(260.0, 150.0, 45.0), 50.0, sphere_glass));

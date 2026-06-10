@@ -330,16 +330,16 @@ fn updateFrameBuffers(scene: *const Scene, ray: Ray, ray_t_range: Interval, inde
 /// Asserts buffer constraints, triggers the rendering routine and the
 /// subsequent post-processing routines, while logging optional metrics.
 pub fn executeRenderPipeline(ctx: PipelineContext) !void {
-    const buf_len = ctx.frame_buffers.diffuse_buf.len;
-    std.debug.assert(ctx.frame_buffers.specular_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.emission_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.g_buffers.albedo_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.g_buffers.normal_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.g_buffers.depth_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.g_buffers.roughness_buf.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.ping_pong_buf_1.len == buf_len);
+    const in_buf_len = ctx.frame_buffers.diffuse_buf.len;
+    std.debug.assert(ctx.frame_buffers.specular_buf.len == in_buf_len);
+    std.debug.assert(ctx.frame_buffers.emission_buf.len == in_buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.albedo_buf.len == in_buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.normal_buf.len == in_buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.depth_buf.len == in_buf_len);
+    std.debug.assert(ctx.frame_buffers.g_buffers.roughness_buf.len == in_buf_len);
+    std.debug.assert(ctx.frame_buffers.ping_pong_buf_1.len == in_buf_len);
     // std.debug.assert(ctx.frame_buffers.ping_pong_buf_2.len == buf_len);
-    std.debug.assert(ctx.frame_buffers.out_buf.len == buf_len);
+    std.debug.assert(ctx.frame_buffers.out_buf.len == 3 * in_buf_len);
     std.debug.assert(ctx.image_height > 0);
     std.debug.assert(ctx.image_width > 0);
 

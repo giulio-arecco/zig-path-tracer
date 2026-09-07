@@ -5,8 +5,7 @@
 
 ![Cornell Box](images/CornellBox.jpg)
 
-## Table of Contents
-- [Table of Contents](#table-of-contents)
+## Table of Contents <!-- omit from toc -->
 - [Introduction \& Motivation](#introduction--motivation)
 - [Software Architecture](#software-architecture)
 - [Technical Details](#technical-details)

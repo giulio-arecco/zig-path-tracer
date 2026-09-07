@@ -1,9 +1,21 @@
-# Zig Path Tracer
+# Zig Path Tracer <!-- omit from toc -->
 
 ![Zig Version](https://img.shields.io/badge/Zig-0.16.0--dev-F7A41D?logo=zig&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
 ![Cornell Box](images/CornellBox.jpg)
+
+## Table of Contents
+- [Table of Contents](#table-of-contents)
+- [Introduction \& Motivation](#introduction--motivation)
+- [Software Architecture](#software-architecture)
+- [Technical Details](#technical-details)
+- [Gallery \& Performance](#gallery--performance)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Clone the Repository](#clone-the-repository)
+  - [Build \& Run](#build--run)
+  - [Command Line Arguments](#command-line-arguments)
 
 ## Introduction & Motivation
 
@@ -25,7 +37,7 @@ Building upon the foundational concepts from the *[Ray Tracing in One Weekend](h
 
 * **Rendering**: the path tracer recursively traces rays through the scene while separating diffuse, specular, and emissive contributions. Serial rendering processes scanlines sequentially, while parallel rendering distributes independent scanlines to a thread pool.
 
-* **Frame Buffers and G-Buffers**: the rendering pipeline uses explicit buffers for diffuse, specular, emission, albedo, normal, depth, roughness, intermediate results, and final image data. 
+* **Frame Buffers and G-Buffers**: the rendering pipeline uses explicit buffers for diffuse, specular, emission, albedo, normal, depth, roughness, intermediate results, and final image data.
 
 * **Post-Processing and Denoising**: the post-processing pipeline optionally applies joint bilateral or À-Trous denoising to diffuse and specular channels. Both filters use color and geometry buffers for edge preservation and support serial and parallel execution. The pipeline then recomposes the color information into an HDR image.
 
@@ -48,7 +60,7 @@ The engine is built around Data-Oriented Design principles and adheres to the *Z
 
 *Hardware Note: All benchmarks were executed on an i7-12700KF, compiled in `ReleaseFast` mode.*
 
-### Procedural Spheres Scene
+### Procedural Spheres Scene <!-- omit from toc -->
 ![Procedural Spheres](images/ProceduralSpheres.jpg)
 - **Resolution**: 1280x720
 - **Samples per Pixel**: 1000
@@ -56,7 +68,7 @@ The engine is built around Data-Oriented Design principles and adheres to the *Z
 - **Denoising**: Off
 - **Render Time (Parallel)**: 99s
 
-### Cornell Box Scene
+### Cornell Box Scene <!-- omit from toc -->
 ![Cornell Box](images/CornellBox.jpg)
 - **Resolution**: 800x800
 - **Samples per Pixel**: 1000
@@ -64,7 +76,7 @@ The engine is built around Data-Oriented Design principles and adheres to the *Z
 - **Denoising**: Off
 - **Render Time (Parallel)**: 112s
 
-### Denoising Comparison (Low Sample Count)
+### Denoising Comparison (Low Sample Count) <!-- omit from toc -->
 
 To demonstrate the efficiency of the post-processing pipeline, the following renders are generated at extremely low sample counts, where Monte Carlo noise is heavily present.
 
@@ -73,7 +85,7 @@ To demonstrate the efficiency of the post-processing pipeline, the following ren
 | ![Raw](images/CornellBox-LowSamples.jpg) | ![Joint Bilateral](images/CornellBox-LowSamples-JointBilateral.jpg) | ![ATrous](images/CornellBox-LowSamples-ATrous.jpg) |
 | **Render Time**: 5892ms | **Total Time**: 6481ms | **Total Time**: 6175ms |
 
-### Final Scene
+### Final Scene <!-- omit from toc -->
 ![Final Scene](images/Final.jpg)
 - **Resolution**: 800x800
 - **Samples per Pixel**: 1000

@@ -25,8 +25,7 @@ Building upon the foundational concepts from the *[Ray Tracing in One Weekend](h
 
 * **Rendering**: the path tracer recursively traces rays through the scene while separating diffuse, specular, and emissive contributions. Serial rendering processes scanlines sequentially, while parallel rendering distributes independent scanlines to a thread pool.
 
-* **Frame Buffers and G-Buffers**
-The rendering pipeline uses explicit buffers for diffuse, specular, emission, albedo, normal, depth, roughness, intermediate results, and final image data. 
+* **Frame Buffers and G-Buffers**: the rendering pipeline uses explicit buffers for diffuse, specular, emission, albedo, normal, depth, roughness, intermediate results, and final image data. 
 
 * **Post-Processing and Denoising**: the post-processing pipeline optionally applies joint bilateral or À-Trous denoising to diffuse and specular channels. Both filters use color and geometry buffers for edge preservation and support serial and parallel execution. The pipeline then recomposes the color information into an HDR image.
 

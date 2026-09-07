@@ -11,18 +11,30 @@ This project is a CPU-based Monte Carlo path tracer written in the Zig programmi
 
 Building upon the foundational concepts from the *[Ray Tracing in One Weekend](https://raytracing.github.io/)* series, the codebase shifts away from C++ object-oriented patterns to leverage Zig's procedural design, explicit memory management, and data-oriented structures.
 
-## Features
+## Software Architecture
 
-### Computer Graphics & Rendering
-- **Monte Carlo Path Tracing**: Global illumination engine supporting multi-bounce light transport.
-- **Geometrical Primitives & Instancing**: Support for spheres, quads, boxes, and spatial transformations (translation and rotation).
-- **Bounding Volume Hierarchy (BVH)**: Spatial acceleration structures optimizing ray-geometry intersection queries.
-- **Materials**: Physically based light interaction models, including `Lambertian` (diffuse), `Metal` (reflective with fuzziness), `Dielectric` (refractive), and `DiffuseLight` (emissive).
-- **Camera Model**: Depth of field and pixel-stratified sampling for anti-aliasing.
-- **G-Buffers & Edge-aware Denoising**: Extraction of intermediate surface features (albedo, normals, depth, roughness) for custom Joint Bilateral and À-Trous spatial filters, mitigating Monte Carlo noise at low sample counts.
-- **HDR Tone Mapping**: Multiple HDR-to-LDR conversion algorithms (*Reinhard*, *Extended Reinhard*, *Exposure*, and *Gamma Compression*).
+* **Application Configuration**: the executable handles CLI parsing, help output, scene and renderer selection, render settings, progress tracking, timing reports, and pipeline initialization.
 
-### Technical Details
+* **Core Utilities and Mathematics**: shared utilities provide global configuration, numeric intervals, floating-point comparisons, quadratic-discriminant evaluation, range conversion, compile-time interface validation, and explicit allocator management. The mathematical layer provides vector operations, normalization, distance calculations, random geometric sampling, reflection, and refraction.
+
+* **Camera, Rays, and Color**: the camera system supports perspective and look-at construction, viewport calculation, stratified anti-aliasing, and depth-of-field sampling. Rays provide parametric 3D traversal. The color system separates 8-bit RGB output colors from HDR linear colors used for light transport, with vectorized arithmetic, gradients, luminance, validation, and packed-pixel conversion.
+
+* **Scene and Materials**: the scene owns the camera, background, geometry, materials, optional BVH, and scene lifecycle. Materials use tagged unions to implement Lambertian diffusion, metallic reflection, dielectric reflection and refraction, diffuse emission, attenuation, roughness, and scattering classification.
+
+* **Geometry and Spatial Acceleration**: the geometry system implements spheres, quadrilaterals, boxes, hit records, polymorphic hittable dispatching, translation, and rotation around each axis. It also provides object-space transformations, axis-aligned bounding boxes, slab intersection tests, and closest-hit selection. BVHs accelerate traversal through longest-axis partitioning, geometry reordering, iterative node traversal, and narrowed ray intervals.
+
+* **Rendering**: the path tracer recursively traces rays through the scene while separating diffuse, specular, and emissive contributions. Serial rendering processes scanlines sequentially, while parallel rendering distributes independent scanlines to a thread pool.
+
+* **Frame Buffers and G-Buffers**
+The rendering pipeline uses explicit buffers for diffuse, specular, emission, albedo, normal, depth, roughness, intermediate results, and final image data. 
+
+* **Post-Processing and Denoising**: the post-processing pipeline optionally applies joint bilateral or À-Trous denoising to diffuse and specular channels. Both filters use color and geometry buffers for edge preservation and support serial and parallel execution. The pipeline then recomposes the color information into an HDR image.
+
+* **Display and Image Output**: display conversion supports clamp, Reinhard, extended Reinhard, exposure, and gamma tone mapping, followed by range limiting, sRGB correction, and 8-bit RGB conversion. The filesystem layer creates directories, prevents filename collisions, generates PPM P6 headers, memory-maps output files, and writes RGB data directly to the mapped image.
+
+* **Testing and Resource Management**: embedded tests cover mathematics, vectors, colors, cameras, rays, geometry, BVHs, scenes, filesystem operations, image output, display transforms, and rendering support. Explicit ownership governs materials, transformed geometry, BVHs, buffers, files, memory maps, and concurrency resources, enabling deterministic cleanup across the complete pipeline.
+
+## Technical Details
 The engine is built around Data-Oriented Design principles and adheres to the *Zen of Zig*, prioritizing explicit control flow, lack of hidden allocations, and optimal memory layouts.
 
 *   **Zero-Cost Polymorphism:** The rendering backend utilizes a Strategy Pattern implemented via tagged unions (`RenderBackend`). By leveraging Zig's `inline else` prongs in the `Renderer.render` orchestrator, dispatching is resolved entirely at compile-time.

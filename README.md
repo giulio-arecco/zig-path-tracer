@@ -1,4 +1,4 @@
-﻿# Zig Path Tracer
+# Zig Path Tracer
 
 ![Zig Version](https://img.shields.io/badge/Zig-0.16.0--dev-F7A41D?logo=zig&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -47,10 +47,6 @@
   - [9.3 Collision-Free File Generation & Comptime Headers](#93-collision-free-file-generation--comptime-headers)
 - [Gallery & Performance](#gallery--performance)
 - [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Clone the Repository](#clone-the-repository)
-  - [Build & Run](#build--run)
-  - [Command Line Arguments](#command-line-arguments)
 
 ---
 
@@ -207,20 +203,13 @@ Spatial mathematics are encapsulated in `Vec3.zig`:
   * `randomOnHemisphere`: Aligns sampled directions with the local surface normal hemisphere.
 * Optical Physics:
   * `reflectOnUnit`: Computes mirrored directional reflection for incident vector $v$ and unit normal $n$: $v_{\text{refl}} = v - 2(v \cdot n)n$.
-  * `refract`: Implements Snell's law in vector form for incident unit vector $v$, unit normal $n$, and refractive index ratio $\eta = \eta_i / \eta_t$:
-
-    $$
-    r_{\perp} = \eta (v + \cos\theta \cdot n), \quad r_{\parallel} = -\sqrt{|1.0 - \|r_{\perp}\|^2|} \cdot n, \quad v_{\text{refr}} = r_{\perp} + r_{\parallel}
-    $$
-
-    where $\cos\theta = \min(-v \cdot n, 1.0)$. If total internal reflection occurs ($\eta \sin\theta > 1.0$), the material branches to reflection instead.
-* SIMD Extensions: Alternative implementations backed by Zig's native `@Vector(3, Float)` primitive support vector hardware instruction sets (SSE/AVX/NEON) for vectorized dot products (`@reduce(.Add, a * b)`), magnitudes, cross products, and normalization.
+  * `refract`: Implements Snell's law in vector form for incident unit vector $v$, unit normal $n$, and refractive index ratio $\eta = \eta_i / \eta_t$, evaluating $r_{\perp} = \eta (v + \cos\theta \cdot n)$, $r_{\parallel} = -\sqrt{|1.0 - \|r_{\perp}\|^2|} \cdot n$, and $v_{\text{refr}} = r_{\perp} + r_{\parallel}$, where $\cos\theta = \min(-v \cdot n, 1.0)$. If total internal reflection occurs ($\eta \sin\theta > 1.0$), the material branches to reflection instead.
+* SIMD Extensions: Alternative implementations backed by Zig's native `@Vector(3, Float)` primitive support vector hardware instruction sets for vectorized dot products (`@reduce(.Add, a * b)`), magnitudes, cross products, and normalization.
 
 ### 3.5 Linear High-Dynamic-Range Color Transport
 
 Color handling is divided between two dedicated types:
 * `LinearColor.zig`: Encapsulates an unbounded HDR radiant flux vector using an underlying `@Vector(3, Float)`. All physical light transport, scattering accumulation, and attenuation multiplications occur within this linear space. SIMD parallel multiplication (`self.v * other.v`) ensures vectorized light attenuation.
-* `isValid()` Verification: Validates color stability during execution, asserting that color values do not contain negative energy, NaNs, or infinite floats.
 * `Color.zig`: Represents an 8-bit non-linear sRGB pixel $[0, 255]^3$. Provides `toPacked() u24` for rapid serialization into frame buffers.
 
 ---
@@ -231,26 +220,30 @@ Color handling is divided between two dedicated types:
 
 The engine defines three geometric primitives in `geometry.zig`:
 
-* **`Sphere`:** Solves ray-sphere intersection by mapping ray $P(t) = O + t d$ into the implicit sphere equation $(P - C)^2 - r^2 = 0$. With eye-to-center vector $(C - O)$, the reduced quadratic coefficients are:
+#### Sphere <!-- omit from toc -->
+Solves ray-sphere intersection by mapping ray $P(t) = O + t d$ into the implicit sphere equation $(P - C)^2 - r^2 = 0$. With eye-to-center vector $(C - O)$, the reduced quadratic coefficients are:
 
-  $$
-  a = d \cdot d, \quad h = d \cdot (C - O), \quad c = (C - O) \cdot (C - O) - r^2
-  $$
+$$
+a = d \cdot d, \quad h = d \cdot (C - O), \quad c = (C - O) \cdot (C - O) - r^2
+$$
 
-  The roots are resolved via `evaluateDiscriminantReduced`. The nearest root $t$ within `ray_t_range` yields the intersection point $P$, and the outward unit normal $(P - C) / r$ is oriented against the incident ray via `HitRecord.determineNormalOrientation`.
+The roots are resolved via `evaluateDiscriminantReduced`. The nearest root $t$ within `ray_t_range` yields the intersection point $P$, and the outward unit normal $(P - C) / r$ is oriented against the incident ray via `HitRecord.determineNormalOrientation`.
 
-* **`Quad`:** Represents a planar quadrilateral defined by corner point $Q$ and edge vectors $u$ and $v$. In `Quad.init`, the supporting plane normal $n = u \times v$, unit normal $\hat{n} = n / \|n\|$, plane constant $D = \hat{n} \cdot Q$, and planar basis vector $w = n / (n \cdot n)$ are precomputed. In `Quad.hit`, ray intersection with the supporting plane computes distance:
+#### Quad <!-- omit from toc -->
+Represents a planar quadrilateral defined by corner point $Q$ and edge vectors $u$ and $v$. In `Quad.init`, the supporting plane normal $n = u \times v$, unit normal $\hat{n} = n / \|n\|$, plane constant $D = \hat{n} \cdot Q$, and planar basis vector $w = n / (n \cdot n)$ are precomputed. In `Quad.hit`, ray intersection with the supporting plane computes distance:
 
-  $$
-  t = \frac{D - \hat{n} \cdot O}{\hat{n} \cdot d}
-  $$
+$$
+t = \frac{D - \hat{n} \cdot O}{\hat{n} \cdot d}
+$$
 
-  Planar coordinates within the quad's basis are evaluated as $\alpha = w \cdot ((P - Q) \times v)$ and $\beta = w \cdot (u \times (P - Q))$. The intersection is valid if both $\alpha, \beta \in [0, 1]$.
+Planar coordinates within the quad's basis are evaluated as $\alpha = w \cdot ((P - Q) \times v)$ and $\beta = w \cdot (u \times (P - Q))$. The intersection is valid if both $\alpha, \beta \in [0, 1]$.
 
-* **`Box`:** Encapsulates six internal planar `Quad` surfaces corresponding to opposing faces.
-* **Transform Decorators (`Translated`, `Rotate`):**
-  * `Translated`: Offsets the incident ray origin by $-\text{offset}$ into object space, performs intersection tests against the nested hittable, and offsets the resulting collision point forward by $+\text{offset}$.
-  * `Rotate(comptime axis: Axis)`: Evaluates inverse rotation on ray origin and direction by $-\theta$ around the specified axis using precomputed $\sin\theta$ and $\cos\theta$. Intersection points and normal vectors are rotated forward by $+\theta$ back to world space. Bounding boxes are computed by rotating all eight AABB corners and evaluating coordinate minimums and maximums.
+#### Box <!-- omit from toc -->
+Encapsulates six internal planar `Quad` surfaces corresponding to opposing faces.
+
+#### Transform Decorators (`Translated`, `Rotate`) <!-- omit from toc -->
+* `Translated`: Offsets the incident ray origin by $-\text{offset}$ into object space, performs intersection tests against the nested hittable, and offsets the resulting collision point forward by $+\text{offset}$.
+* `Rotate(comptime axis: Axis)`: Evaluates inverse rotation on ray origin and direction by $-\theta$ around the specified axis using precomputed $\sin\theta$ and $\cos\theta$. Intersection points and normal vectors are rotated forward by $+\theta$ back to world space. Bounding boxes are computed by rotating all eight AABB corners and evaluating coordinate minimums and maximums.
 
 ### 4.2 Polymorphic Hittable Dispatch
 
@@ -394,21 +387,19 @@ Stratified sampling bounds sample dispersion across sub-pixel cells, reducing lo
 
 ### 5.3 Physical Thin-Lens Defocus Blur
 
-Depth of field is simulated via a physical thin-lens model:
-* A non-zero defocus angle ($\theta_{\text{defocus}}$, configured via `defocus_angle`) defines the aperture disk radius based on focal distance ($d_{\text{focus}}$, configured via `focus_distance`):
+Depth of field is simulated via a physical thin-lens model. A non-zero defocus angle ($\theta_{\text{defocus}}$, configured via `defocus_angle`) defines the aperture disk radius based on focal distance ($d_{\text{focus}}$, configured via `focus_distance`):
 
-  $$
-  r_{\text{defocus}} = d_{\text{focus}} \cdot \tan\left(\frac{\theta_{\text{defocus}}}{2} \cdot \frac{\pi}{180}\right)
-  $$
+$$
+r_{\text{defocus}} = d_{\text{focus}} \cdot \tan\left(\frac{\theta_{\text{defocus}}}{2} \cdot \frac{\pi}{180}\right)
+$$
 
-* Ray origins are sampled across the aperture disk by offsetting the camera position using unit disk coordinates $(p_x, p_y)$ from `Vec3.randomInUnitDisk`:
+Ray origins are sampled across the aperture disk by offsetting the camera position using unit disk coordinates $(p_x, p_y)$ from `Vec3.randomInUnitDisk`:
 
-  $$
-  P_{\text{origin}} = P_{\text{camera}} + (u_{\text{disk}} \cdot p_x) + (v_{\text{disk}} \cdot p_y)
-  $$
+$$
+P_{\text{origin}} = P_{\text{camera}} + (u_{\text{disk}} \cdot p_x) + (v_{\text{disk}} \cdot p_y)
+$$
 
-  where $u_{\text{disk}} = u_{\text{right}} \cdot r_{\text{defocus}}$ and $v_{\text{disk}} = u_{\text{up}} \cdot r_{\text{defocus}}$.
-* Rays converge at the focal plane located at `focus_distance`, producing focal sharpness at the target distance and progressive circle-of-confusion blur elsewhere.
+where $u_{\text{disk}} = u_{\text{right}} \cdot r_{\text{defocus}}$ and $v_{\text{disk}} = u_{\text{up}} \cdot r_{\text{defocus}}$. Rays converge at the focal plane located at `focus_distance`, producing focal sharpness at the target distance and progressive circle-of-confusion blur elsewhere.
 
 ---
 
@@ -451,7 +442,7 @@ pub const SplitIrradiance = struct {
    * `roughness_buf`: Surface microfacet roughness (0.0 for dielectrics and smooth metals, 1.0 for Lambertian surfaces).
 2. **Primary Irradiance Separation (`tracePrimaryRay`):**
    * Diffuse paths store incoming indirect radiance without multiplying by albedo. This keeps diffuse lighting smooth and untextured for spatial denoising.
-   * Specular reflections multiply incoming light by attenuation immediately, baking mirror highlights and dielectric transmissions into `specular_buf`.
+   * Specular reflections multiply incoming light by attenuation immediately, baking mirror highlights and dielectric transmissions into `specular_buf``.
    * Emissive materials write directly to `emission_buf`.
 
 ---
@@ -553,30 +544,10 @@ On specular surfaces with near-zero roughness (such as dielectrics and smooth me
 
 The `JointBilateralDenoiser` filters input channels using an $N \times N$ spatial kernel (e.g., $15 \times 15$). It weights neighboring pixels by combining four continuous edge-stopping weights into $W(p, q) = w_{\text{space}} \cdot w_{\text{normal}} \cdot w_{\text{depth}} \cdot w_{\text{luma}}$:
 
-* **Spatial Distance Weight:** Penalizes Euclidean pixel distance between center pixel $(x, y)$ and neighbor $(i, j)$:
-
-  $$
-  w_{\text{space}} = \exp\left(-\frac{(x - i)^2 + (y - j)^2}{2\sigma_{\text{space}}^2}\right)
-  $$
-
-* **Normal Discontinuity Weight:** Penalizes surface normal deviation between center normal $n_p$ and neighbor normal $n_q$:
-
-  $$
-  w_{\text{normal}} = \exp\left(-\frac{(1.0 - \text{clamp}(n_p \cdot n_q, -1.0, 1.0))^2}{2\sigma_{\text{normal}}^2}\right)
-  $$
-
-* **Planar Depth Weight:** Measures perpendicular distance from neighbor point $P_q$ to the tangent plane at center point $P_p$, where $d_{\text{plane}} = |(P_q - P_p) \cdot n_p|$:
-
-  $$
-  w_{\text{depth}} = \exp\left(-\frac{d_{\text{plane}}^2}{2\sigma_{\text{depth}}^2}\right)
-  $$
-
-  *(Note: Background pixels with infinite depth yield $w_{\text{depth}} = 0.0$, preventing edge leakage).*
-* **Normalized Luminance Weight:** Evaluates perceived brightness difference using normalized sRGB luminance $L_{\text{norm}} = L / (1.0 + L)$ (where $L = 0.2126R + 0.7152G + 0.0722B$):
-
-  $$
-  w_{\text{luma}} = \exp\left(-\frac{(L_{\text{norm}, p} - L_{\text{norm}, q})^2}{2\sigma_{\text{luma}}^2}\right)
-  $$
+* **Spatial Distance Weight:** Penalizes Euclidean pixel distance between center pixel $(x, y)$ and neighbor $(i, j)$: $w_{\text{space}} = \exp\left(-\frac{(x - i)^2 + (y - j)^2}{2\sigma_{\text{space}}^2}\right)$.
+* **Normal Discontinuity Weight:** Penalizes surface normal deviation between center normal $n_p$ and neighbor normal $n_q$: $w_{\text{normal}} = \exp\left(-\frac{(1.0 - \text{clamp}(n_p \cdot n_q, -1.0, 1.0))^2}{2\sigma_{\text{normal}}^2}\right)$.
+* **Planar Depth Weight:** Measures perpendicular distance from neighbor point $P_q$ to the tangent plane at center point $P_p$: $w_{\text{depth}} = \exp\left(-\frac{d_{\text{plane}}^2}{2\sigma_{\text{depth}}^2}\right)$, where $d_{\text{plane}} = |(P_q - P_p) \cdot n_p|$ (infinite depth background pixels yield $w_{\text{depth}} = 0.0$, preventing edge leakage).
+* **Normalized Luminance Weight:** Evaluates perceived brightness difference using normalized sRGB luminance: $w_{\text{luma}} = \exp\left(-\frac{(L_{\text{norm}, p} - L_{\text{norm}, q})^2}{2\sigma_{\text{luma}}^2}\right)$, where $L_{\text{norm}} = L / (1.0 + L)$ and $L = 0.2126R + 0.7152G + 0.0722B$.
 
 Filtered pixel radiance is evaluated as the normalized weighted sum:
 
@@ -608,28 +579,29 @@ The à-trous pass swaps buffer pointers using `std.mem.swap([]LinearColor, &curr
 
 Once denoising completes, the final output image is synthesized in two stages:
 
-1. **Color Recomposition (`colorRecomposition`):**
-   Recombines separated light transport buffers:
+#### Color Recomposition (`colorRecomposition`) <!-- omit from toc -->
+Recombines separated light transport buffers by multiplying the filtered diffuse irradiance by the high-frequency albedo buffer and adding specular reflection and emission:
 
-   $$
-   C_{\text{HDR}} = (E_{\text{diffuse}} \odot A_{\text{albedo}}) + E_{\text{specular}} + E_{\text{emission}}
-   $$
+$$
+C_{\text{HDR}} = (E_{\text{diffuse}} \odot A_{\text{albedo}}) + E_{\text{specular}} + E_{\text{emission}}
+$$
 
-   Multiplying the filtered diffuse irradiance by the high-frequency albedo buffer restores crisp surface textures without noise amplification.
-2. **Display Transform (`DisplayTransform`):**
-   * **Tone Mapping:** Compresses unbounded linear radiance values into the displayable dynamic range $[0.0, 1.0]$. Available operators include:
-     * *Clamp:* $\min(C, 1.0)$
-     * *Reinhard:* $C / (1.0 + C)$
-     * *Extended Reinhard:* $C \cdot \left(1.0 + \frac{C}{C_{\text{white}}^2}\right) / (1.0 + C)$
-     * *Exp:* $1.0 - \exp(-C \cdot \text{exposure})$
-     * *Gamma Compression:* $a \cdot C^\gamma$
-   * **sRGB Gamma Correction:** Applies the IEC 61966-2-1 standard electro-optical transfer curve to each normalized channel $C \in [0.0, 1.0]$:
+This restores crisp surface textures without noise amplification.
 
-     $$
-     C_{\text{sRGB}} = \begin{cases} 12.92 \cdot C & \text{if } C \le 0.0031308 \\ 1.055 \cdot C^{1 / 2.4} - 0.055 & \text{if } C > 0.0031308 \end{cases}
-     $$
+#### Display Transform (`DisplayTransform`) <!-- omit from toc -->
+* **Tone Mapping:** Compresses unbounded linear radiance values into the displayable dynamic range $[0.0, 1.0]$. Available operators include:
+  * *Clamp:* $\min(C, 1.0)$
+  * *Reinhard:* $C / (1.0 + C)$
+  * *Extended Reinhard:* $C \cdot \left(1.0 + \frac{C}{C_{\text{white}}^2}\right) / (1.0 + C)$
+  * *Exp:* $1.0 - \exp(-C \cdot \text{exposure})$
+  * *Gamma Compression:* $a \cdot C^\gamma$
+* **sRGB Gamma Correction:** Applies the IEC 61966-2-1 standard electro-optical transfer curve to each normalized channel $C \in [0.0, 1.0]$:
 
-   * **Quantization:** Clamps transformed channels to $[0.0, 1.0]$, scales by 255.0, rounds to nearest integer, and writes packed 24-bit RGB values directly to kernel memory-mapped pages.
+$$
+C_{\text{sRGB}} = \begin{cases} 12.92 \cdot C & \text{if } C \le 0.0031308 \\\\ 1.055 \cdot C^{1 / 2.4} - 0.055 & \text{if } C > 0.0031308 \end{cases}
+$$
+
+* **Quantization:** Clamps transformed channels to $[0.0, 1.0]$, scales by 255.0, rounds to nearest integer, and writes packed 24-bit RGB values directly to kernel memory-mapped pages.
 
 ---
 

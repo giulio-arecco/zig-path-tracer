@@ -32,7 +32,7 @@
   - [6.1 Material Scattering Formulations](#61-material-scattering-formulations)
   - [6.2 Recursive Monte Carlo Path Tracing](#62-recursive-monte-carlo-path-tracing)
   - [6.3 Split Irradiance & G-Buffer Extraction](#63-split-irradiance--g-buffer-extraction)
-- [7. Multi-Threading & Concurrency Execution](#7-multi-threading--concurrency-execution)
+- [7. Multithreading & Concurrency Execution](#7-multithreading--concurrency-execution)
   - [7.1 Scanline Task Decomposition](#71-scanline-task-decomposition)
   - [7.2 Statistical PRNG Decorrelation](#72-statistical-prng-decorrelation)
 - [8. Image Post-Processing & Denoising Pipeline](#8-image-post-processing--denoising-pipeline)
@@ -447,11 +447,11 @@ pub const SplitIrradiance = struct {
 
 ---
 
-## 7. Multi-Threading & Concurrency Execution
+## 7. Multithreading & Concurrency Execution
 
 ### 7.1 Scanline Task Decomposition
 
-Parallel rendering is implemented in `ParallelPathTracer` using standard library multi-threading:
+Parallel rendering is implemented in `ParallelPathTracer` using standard library multithreading:
 * Work is split into horizontal scanlines (rows 0 to `image_height` - 1).
 * Each task receives a dedicated `FrameBuffersRenderView` pointing to its corresponding row buffer slice (`start .. end`), avoiding data races across worker threads.
 * Tasks are dispatched through `std.Io.Group`:
